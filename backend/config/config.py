@@ -16,15 +16,9 @@ class Settings(BaseSettings):
     # Gemini (채팅/분류용)
     GEMINI_API_KEY: str
     
-    # LlamaParse
-    LLAMA_API_KEY: str
-    
     # Server
     BACKEND_PORT: int = 8000
     FRONTEND_URL: str = "http://localhost:5173"
-    
-    # PDF Parser
-    PDF_PARSER: str = "gemini"  # 'gemini' or 'llamaparse'
     
     class Config:
         env_file = ".env"

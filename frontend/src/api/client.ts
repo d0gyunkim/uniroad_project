@@ -24,14 +24,6 @@ export interface ChatResponse {
 export interface UploadResponse {
   success: boolean
   message: string
-  classification: {
-    category: string
-    categoryName: string
-    emoji: string
-    confidence: number
-    reason: string
-    keywords: string[]
-  }
   stats: {
     totalPages: number
     chunksTotal: number
@@ -79,7 +71,7 @@ export const uploadDocument = async (
     headers: {
       'Content-Type': 'multipart/form-data',
     },
-    timeout: 120000, // 업로드는 오래 걸림
+    timeout: 180000, // 3분 (큰 파일 대비)
   })
   return response.data
 }
@@ -88,11 +80,13 @@ export const uploadDocument = async (
 export const updateDocument = async (
   id: string,
   title: string,
-  source: string
+  source: string,
+  hashtags?: string[]
 ): Promise<void> => {
   await api.patch(`/documents/${id}`, {
     title,
     source,
+    hashtags,
   })
 }
 

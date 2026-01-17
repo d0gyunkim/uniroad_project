@@ -2,8 +2,7 @@
 AI 기반 문서 분류 서비스 (개선 버전)
 """
 from services.gemini_service import gemini_service
-from models.rag_models import ClassificationResult
-from config.constants import CLASSIFICATION_SAMPLE_LENGTH, SUMMARY_MAX_LENGTH
+from config.constants import SUMMARY_MAX_LENGTH
 from config.logging_config import classifier_logger as logger
 import json
 
@@ -14,111 +13,6 @@ class ClassifierService:
     def __init__(self):
         """초기화"""
         logger.info("ClassifierService 초기화 완료")
-    
-    async def classify_document(
-        self,
-        text: str,
-        title: str
-    ) -> ClassificationResult:
-        """
-        문서 내용을 읽고 자동 분류
-
-        Args:
-            text: 문서 내용
-            title: 문서 제목
-
-        Returns:
-            분류 결과
-        """
-        logger.info(f"AI 문서 분류 시작 - 제목: {title}")
-
-        # 샘플 추출
-        sample = text[:CLASSIFICATION_SAMPLE_LENGTH]
-        
-        prompt = f"""다음 대학 입시 관련 문서를 읽고 정확히 분류해주세요.
-
-**문서 제목:** {title}
-
-**문서 내용 (앞부분):**
-{sample}
-
----
-
-**분류 기준:**
-1. **policy**: 대학입학 전형 기본사항, 모집요강, 전형 방법, 수시/정시 안내 등
-2. **admission_stats**: 입시 결과, 경쟁률, 합격선, 커트라인, 성적 통계 등
-3. **university_info**: 대학 소개, 학과 정보, 캠퍼스 안내, 장학금 등
-
-**응답 형식 (JSON):**
-{{
-  "category": "policy" 또는 "admission_stats" 또는 "university_info",
-  "confidence": 0.0~1.0 사이 값,
-  "reason": "분류 이유를 한 문장으로",
-  "keywords": ["주요", "키워드", "5개"]
-}}
-
-JSON만 출력하세요."""
-
-        try:
-            # Gemini 호출
-            response_text = await gemini_service.generate(
-                prompt,
-                "당신은 대학 입시 문서 분류 전문가입니다."
-            )
-
-            # JSON 추출
-            result_text = response_text
-            if "```json" in result_text:
-                result_text = result_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in result_text:
-                result_text = result_text.split("```")[1].split("```")[0].strip()
-
-            result = json.loads(result_text)
-
-            # Pydantic 모델로 변환
-            classification = ClassificationResult(
-                category=result.get('category', 'policy'),
-                confidence=float(result.get('confidence', 0.8)),
-                reason=result.get('reason', '자동 분류됨'),
-                keywords=result.get('keywords', [])[:10]
-            )
-
-            emoji = self._get_emoji(classification.category)
-            category_name = self._get_category_name(classification.category)
-
-            logger.info(f"분류 완료 - {emoji} {category_name} (신뢰도: {classification.confidence*100:.0f}%)")
-            logger.info(f"이유: {classification.reason}")
-            logger.info(f"키워드: {', '.join(classification.keywords[:5])}")
-
-            return classification
-
-        except Exception as e:
-            logger.error(f"분류 오류: {e}")
-            # 기본값 반환
-            return ClassificationResult(
-                category='policy',
-                confidence=0.5,
-                reason=f'자동 분류 실패: {str(e)}',
-                keywords=[]
-            )
-    
-    def _get_emoji(self, category: str) -> str:
-        """카테고리별 이모지"""
-        emojis = {
-            'policy': '📋',
-            'admission_stats': '📊',
-            'university_info': '🏫'
-        }
-        return emojis.get(category, '📄')
-    
-    def _get_category_name(self, category: str) -> str:
-        """카테고리 한글명"""
-        names = {
-            'policy': '정책/요강 문서',
-            'admission_stats': '입시 결과 통계',
-            'university_info': '대학 정보'
-        }
-        return names.get(category, '미분류')
     
     async def create_summary_and_extract_source(
         self, 
@@ -202,13 +96,6 @@ JSON만 출력하세요."""
                 "source": "미상"
             }
     
-    async def create_summary(self, text: str, title: str, max_length: int = None) -> str:
-        """
-        하위 호환성을 위한 래퍼 함수
-        """
-        result = await self.create_summary_and_extract_source(text, title, max_length)
-        return result["summary"]
-    
     async def extract_hashtags(self, text: str, title: str) -> list[str]:
         """
         Gemini로 문서 해시태그 자동 추출
@@ -290,8 +177,8 @@ JSON만 출력하세요."""
 """
         
         try:
-            # Gemini 호출 (Lite 모델)
-            response = await gemini_service.generate_text_lite(prompt)
+            # Gemini 호출
+            response = await gemini_service.generate(prompt, "")
             
             # JSON 파싱
             import re

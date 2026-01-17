@@ -22,34 +22,6 @@ class SupabaseService:
         return cls._instance
     
     @classmethod
-    async def vector_search(
-        cls,
-        query_embedding: list[float],
-        match_threshold: float = 0.78,
-        match_count: int = 5
-    ) -> list[dict]:
-        """벡터 검색 실행"""
-        client = cls.get_client()
-        
-        try:
-            # 임베딩을 PostgreSQL vector 형식으로 변환
-            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-            
-            response = client.rpc(
-                'match_documents',
-                {
-                    'query_embedding': embedding_str,
-                    'match_threshold': match_threshold,
-                    'match_count': match_count
-                }
-            ).execute()
-            
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"❌ 벡터 검색 오류: {e}")
-            return []
-    
-    @classmethod
     def upload_pdf_to_storage(
         cls,
         file_bytes: bytes,
@@ -171,7 +143,8 @@ class SupabaseService:
         cls,
         file_name: str,
         title: Optional[str] = None,
-        source: Optional[str] = None
+        source: Optional[str] = None,
+        hashtags: Optional[list] = None
     ) -> bool:
         """문서 메타데이터 수정"""
         client = cls.get_client()
@@ -182,6 +155,8 @@ class SupabaseService:
                 update_data['title'] = title
             if source is not None:
                 update_data['source'] = source
+            if hashtags is not None:
+                update_data['hashtags'] = hashtags
             
             if not update_data:
                 return True  # 수정할 내용 없음
@@ -192,6 +167,8 @@ class SupabaseService:
                 .execute()
             
             print(f"✅ 문서 메타데이터 수정 완료: {file_name}")
+            if hashtags is not None:
+                print(f"   해시태그: {hashtags}")
             return True
         except Exception as e:
             print(f"❌ 문서 메타데이터 수정 오류: {e}")
