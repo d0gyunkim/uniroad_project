@@ -1,25 +1,34 @@
 """
-Orchestration Agent Test Server
-- 기존 프로젝트와 완전히 분리된 독립 서버
-- Sub Agent와 Final Agent는 구현하지 않고, Orchestration Agent만 테스트
+Multi-Agent 입시 상담 시스템
+전체 파이프라인: Orchestration Agent → Sub Agents → Final Agent → 최종 답변
 """
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import google.generativeai as genai
 import json
+import asyncio
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Gemini API 키 설정 (기존 프로젝트의 키 사용)
-GEMINI_API_KEY = "AIzaSyCyTP7xvK-XLaJXUOxRbu5MpkgxlRGNpkQ"
+# .env 파일 로드
+load_dotenv()
+
+# Sub Agents와 Final Agent import
+from sub_agents import execute_sub_agents, get_agent
+from final_agent import generate_final_answer
+
+# Gemini API 키 설정 (환경 변수에서 로드)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY 환경 변수를 설정해주세요.")
 genai.configure(api_key=GEMINI_API_KEY)
 
-app = FastAPI(title="Orchestration Agent Test Server")
+app = FastAPI(title="Multi-Agent 입시 상담 시스템")
 
 # CORS 설정
 app.add_middleware(
@@ -33,7 +42,7 @@ app.add_middleware(
 # 대화 이력 저장 (메모리)
 conversation_history: Dict[str, List[Dict]] = {}
 
-# 가용 에이전트 목록 (Sub Agent 정의 - 이름과 설명만)
+# 가용 에이전트 목록
 AVAILABLE_AGENTS = [
     {
         "name": "서울대 agent",
@@ -49,11 +58,11 @@ AVAILABLE_AGENTS = [
     },
     {
         "name": "컨설팅 agent",
-        "description": "여러 대학/전형을 비교 분석, 학생에게 적절한 대학 추천 및 학생 성적대로 합격 가능성 평가"
+        "description": "전국 대학별/전형별/학과별 합격 데이터를 비교 분석, 학생 성적 기반 합격 가능성 평가 및 대학 추천"
     },
     {
         "name": "선생님 agent",
-        "description": "현실적인 목표 설정 및 공부 계획 수립"
+        "description": "현실적인 목표 설정 및 공부 계획 수립, 멘탈 관리 조언"
     },
 ]
 
@@ -110,17 +119,18 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 4. fact_check나 analysis가 있으면 반드시 해당 데이터를 가져올 execution_plan이 있어야 함
 5. source_from은 execution_plan의 step 번호와 매칭되어야 함 (예: "Step1_Result")
 6. agent 필드에는 가용 에이전트 목록에 있는 에이전트 이름만 사용
+
+## 간결성 원칙 (매우 중요!)
+- **불필요한 agent 호출 금지**: 간단한 질문에 여러 agent를 호출하지 마세요. 질문의 복잡도에 비례하여 최소한의 agent만 호출하세요.
+- **불필요한 섹션 생성 금지**: 단순 인사나 가벼운 질문에 5개 섹션을 모두 채우지 마세요. 필요한 섹션만 간결하게 구성하세요.
+- 간단한 질문 = 1~2개 agent, 2~3개 섹션
+- 복잡한 비교/분석 질문 = 2개 이상 agent, 3~4개 섹션
 """
 
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
-
-
-class ChatResponse(BaseModel):
-    orchestration_result: Dict[str, Any]
-    raw_response: str
 
 
 def format_agents_for_prompt() -> str:
@@ -134,7 +144,6 @@ def format_agents_for_prompt() -> str:
 def parse_orchestration_response(response_text: str) -> Dict[str, Any]:
     """Gemini 응답에서 JSON 추출 및 파싱"""
     try:
-        # JSON 블록 추출 시도
         if "```json" in response_text:
             json_start = response_text.find("```json") + 7
             json_end = response_text.find("```", json_start)
@@ -144,7 +153,6 @@ def parse_orchestration_response(response_text: str) -> Dict[str, Any]:
             json_end = response_text.find("```", json_start)
             json_str = response_text[json_start:json_end].strip()
         else:
-            # JSON 직접 파싱 시도
             json_str = response_text.strip()
 
         return json.loads(json_str)
@@ -156,39 +164,83 @@ def parse_orchestration_response(response_text: str) -> Dict[str, Any]:
         }
 
 
+async def run_orchestration_agent(message: str, session_id: str) -> Dict[str, Any]:
+    """Orchestration Agent 실행"""
+
+    system_prompt = ORCHESTRATION_SYSTEM_PROMPT.format(
+        agents=format_agents_for_prompt()
+    )
+
+    model = genai.GenerativeModel(
+        model_name="gemini-3-flash-preview",
+        system_instruction=system_prompt
+    )
+
+    # 대화 이력
+    history = []
+    if session_id in conversation_history:
+        for msg in conversation_history[session_id]:
+            history.append({
+                "role": "user" if msg["role"] == "user" else "model",
+                "parts": [msg["content"]]
+            })
+
+    chat_session = model.start_chat(history=history)
+    response = chat_session.send_message(message)
+
+    return parse_orchestration_response(response.text)
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """Orchestration Agent와 대화"""
+    """
+    전체 파이프라인 실행:
+    1. Orchestration Agent → Execution Plan + Answer Structure
+    2. Sub Agents 실행 → 결과 수집
+    3. Final Agent → 최종 답변 생성
+    """
 
     try:
         # 세션 이력 초기화
         if request.session_id not in conversation_history:
             conversation_history[request.session_id] = []
 
-        # Gemini 모델 초기화 (매 요청마다 새로 생성)
-        system_prompt = ORCHESTRATION_SYSTEM_PROMPT.format(
-            agents=format_agents_for_prompt()
+        # ========================================
+        # 1단계: Orchestration Agent
+        # ========================================
+        orchestration_result = await run_orchestration_agent(
+            request.message, request.session_id
         )
 
-        model = genai.GenerativeModel(
-            model_name="gemini-3-flash-preview",
-            system_instruction=system_prompt
+        if "error" in orchestration_result:
+            return {
+                "stage": "orchestration",
+                "error": orchestration_result["error"],
+                "orchestration_result": orchestration_result,
+                "sub_agent_results": None,
+                "final_answer": None
+            }
+
+        execution_plan = orchestration_result.get("execution_plan", [])
+        answer_structure = orchestration_result.get("answer_structure", [])
+        notes = orchestration_result.get("notes", "")
+
+        # ========================================
+        # 2단계: Sub Agents 실행
+        # ========================================
+        sub_agent_results = await execute_sub_agents(execution_plan)
+
+        # ========================================
+        # 3단계: Final Agent - 최종 답변 생성
+        # ========================================
+        final_result = await generate_final_answer(
+            user_question=request.message,
+            answer_structure=answer_structure,
+            sub_agent_results=sub_agent_results,
+            notes=notes
         )
 
-        # 대화 이력을 Gemini 형식으로 변환
-        history = []
-        for msg in conversation_history[request.session_id]:
-            history.append({
-                "role": "user" if msg["role"] == "user" else "model",
-                "parts": [msg["content"]]
-            })
-
-        # 채팅 시작
-        chat_session = model.start_chat(history=history)
-
-        # 메시지 전송
-        response = chat_session.send_message(request.message)
-        response_text = response.text
+        final_answer = final_result.get("final_answer", "답변 생성 실패")
 
         # 대화 이력에 추가
         conversation_history[request.session_id].append({
@@ -197,15 +249,15 @@ async def chat(request: ChatRequest):
         })
         conversation_history[request.session_id].append({
             "role": "assistant",
-            "content": response_text
+            "content": final_answer
         })
 
-        # 응답 파싱
-        orchestration_result = parse_orchestration_response(response_text)
-
         return {
+            "stage": "complete",
             "orchestration_result": orchestration_result,
-            "raw_response": response_text
+            "sub_agent_results": sub_agent_results,
+            "final_answer": final_answer,
+            "metadata": final_result.get("metadata", {})
         }
 
     except Exception as e:
@@ -213,12 +265,23 @@ async def chat(request: ChatRequest):
         error_detail = traceback.format_exc()
         print(f"Error: {error_detail}")
         return {
-            "orchestration_result": {
-                "error": str(e),
-                "detail": error_detail
-            },
-            "raw_response": f"Error: {str(e)}"
+            "stage": "error",
+            "error": str(e),
+            "detail": error_detail,
+            "orchestration_result": None,
+            "sub_agent_results": None,
+            "final_answer": None
         }
+
+
+@app.post("/api/chat/orchestration-only")
+async def chat_orchestration_only(request: ChatRequest):
+    """Orchestration Agent만 실행 (디버깅용)"""
+    try:
+        result = await run_orchestration_agent(request.message, request.session_id)
+        return {"orchestration_result": result}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/agents")
@@ -229,18 +292,14 @@ async def get_agents():
 
 @app.post("/api/agents")
 async def add_agent(agent: Dict[str, Any]):
-    """새 Sub Agent 추가 (이름과 설명만)"""
+    """새 Sub Agent 추가"""
     if "name" not in agent or "description" not in agent:
         raise HTTPException(status_code=400, detail="name과 description은 필수입니다")
 
-    # 중복 체크
     if any(a["name"] == agent["name"] for a in AVAILABLE_AGENTS):
         raise HTTPException(status_code=400, detail=f"이미 존재하는 에이전트: {agent['name']}")
 
-    new_agent = {
-        "name": agent["name"],
-        "description": agent["description"]
-    }
+    new_agent = {"name": agent["name"], "description": agent["description"]}
     AVAILABLE_AGENTS.append(new_agent)
     return {"message": "에이전트 추가 완료", "agent": new_agent}
 
@@ -279,9 +338,10 @@ async def serve_frontend():
 if __name__ == "__main__":
     import uvicorn
     print("\n" + "="*60)
-    print("🚀 Orchestration Agent Test Server")
+    print("🚀 Multi-Agent 입시 상담 시스템")
     print("="*60)
-    print(f"📍 Server: http://localhost:8080")
-    print(f"📍 API Docs: http://localhost:8080/docs")
-    print("="*60 + "\n")
+    print("📍 Server: http://localhost:8080")
+    print("📍 API Docs: http://localhost:8080/docs")
+    print("="*60)
+    print("\n파이프라인: Orchestration → Sub Agents → Final Agent\n")
     uvicorn.run(app, host="0.0.0.0", port=8080)
