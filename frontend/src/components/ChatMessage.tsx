@@ -15,7 +15,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
 
     // 메시지 파싱 및 렌더링
     return (
-      <div className="whitespace-pre-wrap leading-relaxed">
+      <div className="leading-relaxed">
         {parseAndRenderMessage(message, sources, source_urls)}
       </div>
     )
@@ -129,6 +129,21 @@ function findAndParseTable(text: string, keyPrefix: string): {
  * - <cite>...</cite> (기존 형식) → 밑줄 (출처는 문단 끝에 모음)
  * - | ... | 표 형식 → HTML 테이블
  */
+// 텍스트를 줄바꿈 포함하여 렌더링
+function renderTextWithBreaks(text: string, keyPrefix: string): React.ReactNode[] {
+  // 연속 줄바꿈을 하나로 정리
+  const cleanedText = text.replace(/\n\s*\n/g, '\n').trim()
+  if (!cleanedText) return []
+  
+  const lines = cleanedText.split('\n')
+  return lines.map((line, idx) => (
+    <React.Fragment key={`${keyPrefix}-${idx}`}>
+      {line}
+      {idx < lines.length - 1 && <br />}
+    </React.Fragment>
+  ))
+}
+
 function parseAndRenderMessage(
   message: string,
   sources?: string[],
@@ -136,8 +151,11 @@ function parseAndRenderMessage(
 ): React.ReactNode[] {
   const result: React.ReactNode[] = []
   
+  // 메시지 전처리: 연속 빈 줄 제거
+  let cleanMessage = message.replace(/\n\s*\n/g, '\n').trim()
+  
   // 문단 단위로 분리 (【타이틀】 기준)
-  const paragraphs = message.split(/(?=【)/g).filter(p => p.trim())
+  const paragraphs = cleanMessage.split(/(?=【)/g).filter(p => p.trim())
   
   paragraphs.forEach((paragraph, paragraphIndex) => {
     const paragraphResult: React.ReactNode[] = []
@@ -152,7 +170,10 @@ function parseAndRenderMessage(
       if (tableResult.found && tableResult.table) {
         // 표 이전 텍스트가 있으면 먼저 처리
         if (tableResult.beforeTable.trim()) {
-          paragraphResult.push(<span key={`text-${keyIndex++}`}>{tableResult.beforeTable}</span>)
+          const textNodes = renderTextWithBreaks(tableResult.beforeTable.trim(), `tbl-before-${keyIndex}`)
+          if (textNodes.length > 0) {
+            paragraphResult.push(<span key={`text-${keyIndex++}`}>{textNodes}</span>)
+          }
         }
         paragraphResult.push(tableResult.table)
         keyIndex++
@@ -178,8 +199,11 @@ function parseAndRenderMessage(
         .sort((a, b) => a.index - b.index)
 
       if (matches.length === 0) {
-        // 더 이상 패턴 없음 - 나머지 텍스트 추가
-        paragraphResult.push(<span key={`text-${keyIndex++}`}>{remaining}</span>)
+        // 더 이상 패턴 없음 - 나머지 텍스트 추가 (줄바꿈 처리)
+        const textNodes = renderTextWithBreaks(remaining, `text-${keyIndex}`)
+        if (textNodes.length > 0) {
+          paragraphResult.push(<span key={`text-${keyIndex++}`}>{textNodes}</span>)
+        }
         break
       }
 
@@ -189,9 +213,12 @@ function parseAndRenderMessage(
       // 패턴 이전 텍스트 추가 (타이틀 앞 텍스트는 trim)
       if (matchIndex > 0) {
         const beforeText = remaining.substring(0, matchIndex)
-        const trimmedText = firstMatch.type === 'title' ? beforeText.trim() : beforeText
+        const trimmedText = firstMatch.type === 'title' ? beforeText.trim() : beforeText.trim()
         if (trimmedText) {
-          paragraphResult.push(<span key={`text-${keyIndex++}`}>{trimmedText}</span>)
+          const textNodes = renderTextWithBreaks(trimmedText, `before-${keyIndex}`)
+          if (textNodes.length > 0) {
+            paragraphResult.push(<span key={`text-${keyIndex++}`}>{textNodes}</span>)
+          }
         }
       }
 
@@ -212,14 +239,15 @@ function parseAndRenderMessage(
         // <cite data-source="..." data-url="...">...</cite>
         const sourceText = dataCiteMatch[1]
         const sourceUrl = dataCiteMatch[2]
-        const citedText = dataCiteMatch[3]
+        const citedText = dataCiteMatch[3].trim()
 
-        // 텍스트만 추가 (밑줄 없이)
-        paragraphResult.push(
-          <span key={`cite-${keyIndex++}`}>
-            {citedText}
-          </span>
-        )
+        // 텍스트만 추가 (빈 텍스트가 아닌 경우만)
+        if (citedText) {
+          const textNodes = renderTextWithBreaks(citedText, `cite-${keyIndex}`)
+          if (textNodes.length > 0) {
+            paragraphResult.push(<span key={`cite-${keyIndex++}`}>{textNodes}</span>)
+          }
+        }
 
         // 출처 정보 저장 (중복 제거)
         if (sourceText && !paragraphSources.some(s => s.text === sourceText && s.url === sourceUrl)) {
@@ -230,16 +258,17 @@ function parseAndRenderMessage(
       }
       else if (firstMatch.type === 'simpleCite' && simpleCiteMatch) {
         // <cite>...</cite> (기존 형식)
-        const citedText = simpleCiteMatch[1]
+        const citedText = simpleCiteMatch[1].trim()
         const sourceText = sources && simpleCiteIndex < sources.length ? sources[simpleCiteIndex] : null
         const sourceUrl = source_urls && simpleCiteIndex < source_urls.length ? source_urls[simpleCiteIndex] : null
 
-        // 텍스트만 추가 (밑줄 없이)
-        paragraphResult.push(
-          <span key={`cite-${keyIndex++}`}>
-            {citedText}
-          </span>
-        )
+        // 텍스트만 추가 (빈 텍스트가 아닌 경우만)
+        if (citedText) {
+          const textNodes = renderTextWithBreaks(citedText, `scite-${keyIndex}`)
+          if (textNodes.length > 0) {
+            paragraphResult.push(<span key={`cite-${keyIndex++}`}>{textNodes}</span>)
+          }
+        }
 
         // 출처 정보 저장 (중복 제거)
         if (sourceText && !paragraphSources.some(s => s.text === sourceText && s.url === sourceUrl)) {
@@ -253,12 +282,11 @@ function parseAndRenderMessage(
 
     // 문단 결과 추가
     result.push(
-      <div key={`para-${paragraphIndex}`} className="mb-3">
+      <div key={`para-${paragraphIndex}`} className="mb-2">
         {paragraphResult}
-        
-        {/* 문단 끝에 출처 표시 */}
+        {/* 문단 끝에 출처 표시 - 바로 붙임 */}
         {paragraphSources.length > 0 && (
-          <div className="border-t border-gray-200 flex flex-wrap gap-1.5 items-center">
+          <div className="border-t border-gray-200 mt-1 pt-1 flex flex-wrap gap-1.5 items-center">
             <span className="text-[10px] text-gray-500 font-medium">출처:</span>
             {paragraphSources.map((source, idx) => (
               source.url ? (

@@ -95,8 +95,12 @@ class FinalAgent:
             if processed_section:
                 sections.append(processed_section)
         
-        # 섹션들을 한 줄 바꿈으로 연결 (빈 줄 없음)
-        result = '\n'.join(sections)
+        # 섹션이 있으면 섹션들을 연결, 없으면 원본 텍스트 사용
+        if sections:
+            result = '\n'.join(sections)
+        else:
+            # 섹션 마커가 없는 경우 원본 텍스트 사용
+            result = text
         
         # 연속된 빈 줄 모두 제거 (2개 이상의 연속 줄바꿈을 하나로)
         while '\n\n' in result:

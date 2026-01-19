@@ -22,23 +22,23 @@ if GEMINI_API_KEY:
 AVAILABLE_AGENTS = [
     {
         "name": "서울대 agent",
-        "description": "서울대학교 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+        "description": "서울대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "연세대 agent",
-        "description": "연세대학교 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+        "description": "연세대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "고려대 agent",
-        "description": "고려대학교 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+        "description": "고려대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "성균관대 agent",
-        "description": "성균관대학교 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+        "description": "성균관대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "경희대 agent",
-        "description": "경희대학교 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+        "description": "경희대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "컨설팅 agent",
