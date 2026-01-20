@@ -150,6 +150,14 @@ class FinalAgent:
         _log("="*80)
         _log("📝 Final Agent 실행")
         _log("="*80)
+        
+        # 입력 데이터 검증 로그
+        _log(f"🔍 [입력 검증]")
+        _log(f"   user_question: {user_question[:100]}..." if len(user_question) > 100 else f"   user_question: {user_question}")
+        _log(f"   answer_structure 섹션 수: {len(answer_structure)}")
+        _log(f"   sub_agent_results 키: {list(sub_agent_results.keys())}")
+        _log(f"   custom_prompt 사용: {'✅ Yes' if custom_prompt else '❌ No (기본 prompt4 사용)'}")
+        _log(f"   notes: {notes if notes else '(없음)'}")
 
         # Sub Agent 결과 정리 + 출처 정보 수집
         results_text, all_sources, all_source_urls, all_citations = self._format_sub_agent_results(sub_agent_results)
@@ -162,6 +170,9 @@ class FinalAgent:
 
         # 프롬프트 가져오기
         if custom_prompt:
+            _log(f"🎨 [커스텀 프롬프트 사용]")
+            _log(f"   프롬프트 길이: {len(custom_prompt)}자")
+            
             prompt = custom_prompt.format(
                 user_question=user_question,
                 structure_text=structure_text,
@@ -169,8 +180,13 @@ class FinalAgent:
                 notes=notes,
                 all_citations="\n".join(all_citations)
             )
+            
+            _log(f"   포맷 후 길이: {len(prompt)}자")
+            _log(f"   📄 최종 프롬프트 미리보기:")
+            _log(f"   {prompt[:500]}...")
             print(f"🎨 Using custom prompt for final agent")
         else:
+            _log(f"📋 [기본 프롬프트 사용: prompt4]")
             # 기본 프롬프트 사용 (prompt4)
             prompt = get_final_agent_prompt(
                 "prompt4",
@@ -180,6 +196,9 @@ class FinalAgent:
                 notes=notes,
                 all_citations=all_citations
             )
+            _log(f"   프롬프트 길이: {len(prompt)}자")
+            _log(f"   📄 최종 프롬프트 미리보기:")
+            _log(f"   {prompt[:500]}...")
 
         try:
             response = self.model.generate_content(
@@ -258,6 +277,10 @@ class FinalAgent:
             agent_name = result.get("agent", "Unknown")
             status = result.get("status", "unknown")
             content = result.get("result", "결과 없음")
+            
+            _log(f"      {step_key}: agent={agent_name}, status={status}, content_length={len(str(content))}자")
+            
+            _log(f"      {step_key}: agent={agent_name}, status={status}, content_length={len(str(content))}자")
             sources = result.get("sources", [])
             source_urls = result.get("source_urls", [])
             citations = result.get("citations", [])
@@ -282,10 +305,14 @@ class FinalAgent:
 {source_info}
 """)
 
+        _log(f"      ✅ 포맷팅 완료: {len(formatted)}개 결과, 총 출처 {len(all_sources)}개")
         return "\n---\n".join(formatted), all_sources, all_source_urls, all_citations
 
     def _format_answer_structure(self, structure: List[Dict]) -> str:
         """Answer Structure를 텍스트로 포맷"""
+        _log(f"   📋 [Answer Structure 포맷팅 시작]")
+        _log(f"      섹션 수: {len(structure)}")
+        
         formatted = []
 
         for section in structure:
@@ -295,11 +322,14 @@ class FinalAgent:
             source = section.get("source_from", "없음")
             instruction = section.get("instruction", "")
 
+            _log(f"      섹션{sec_num}: type={sec_type}, source_from={source}, title={title[:30] if title else 'N/A'}...")
+            
             formatted.append(f"""**섹션 {sec_num}** [{sec_type}]
 - 타이틀: {title if title else "(타이틀 없음)"}
 - 참조할 데이터: {source if source else "없음 (직접 작성)"}
 - 지시사항: {instruction}""")
 
+        _log(f"      ✅ 포맷팅 완료")
         return "\n\n".join(formatted)
 
     def _generate_fallback_answer(

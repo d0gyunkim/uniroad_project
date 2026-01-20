@@ -290,6 +290,67 @@ async def chat(request: ChatRequest):
         }
 
 
+@app.post("/api/test/final-agent")
+async def test_final_agent(request: dict):
+    """
+    Final Agent 직접 테스트 엔드포인트
+    
+    Request body:
+    {
+        "user_question": str,
+        "answer_structure": List[Dict],
+        "sub_agent_results": Dict[str, Any],
+        "notes": str (optional)
+    }
+    """
+    try:
+        print("\n" + "="*80)
+        print("🧪 Final Agent 테스트 API 호출")
+        print("="*80)
+        
+        user_question = request.get("user_question", "")
+        answer_structure = request.get("answer_structure", [])
+        sub_agent_results = request.get("sub_agent_results", {})
+        notes = request.get("notes", "")
+        
+        print(f"✅ 받은 데이터:")
+        print(f"   user_question: {user_question[:100]}...")
+        print(f"   answer_structure: {len(answer_structure)}개 섹션")
+        print(f"   sub_agent_results: {list(sub_agent_results.keys())}")
+        print(f"   notes: {notes if notes else '(없음)'}")
+        
+        # Final Agent 실행
+        result = await generate_final_answer(
+            user_question=user_question,
+            answer_structure=answer_structure,
+            sub_agent_results=sub_agent_results,
+            notes=notes
+        )
+        
+        print(f"✅ Final Agent 실행 완료")
+        print("="*80 + "\n")
+        
+        return {
+            "status": "success",
+            "result": result,
+            "input_data": {
+                "user_question": user_question,
+                "answer_structure_count": len(answer_structure),
+                "sub_agent_results_keys": list(sub_agent_results.keys()),
+                "notes": notes
+            }
+        }
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"❌ Final Agent 테스트 실패: {error_detail}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "detail": error_detail
+        }
+
+
 @app.post("/api/chat/orchestration-only")
 async def chat_orchestration_only(request: ChatRequest):
     """Orchestration Agent만 실행 (디버깅용)"""

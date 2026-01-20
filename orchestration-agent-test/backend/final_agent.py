@@ -44,15 +44,34 @@ class FinalAgent:
             sub_agent_results: Sub Agent들의 실행 결과
             notes: Orchestration Agent의 추가 지시사항
         """
+        
+        print("")
+        print("="*80)
+        print("📝 Final Agent 실행 (테스트 환경)")
+        print("="*80)
+        
+        # 입력 데이터 검증 로그
+        print(f"🔍 [입력 검증]")
+        print(f"   user_question: {user_question[:100]}..." if len(user_question) > 100 else f"   user_question: {user_question}")
+        print(f"   answer_structure 섹션 수: {len(answer_structure)}")
+        print(f"   sub_agent_results 키: {list(sub_agent_results.keys())}")
+        print(f"   notes: {notes if notes else '(없음)'}")
 
         # Sub Agent 결과를 정리
+        print(f"   📦 [Sub Agent 결과 포맷팅 시작]")
+        print(f"      받은 결과 키: {list(sub_agent_results.keys())}")
+        
         results_text = self._format_sub_agent_results(sub_agent_results)
 
         # Answer Structure를 텍스트로 변환
+        print(f"   📋 [Answer Structure 포맷팅 시작]")
+        print(f"      섹션 수: {len(answer_structure)}")
         structure_text = self._format_answer_structure(answer_structure)
 
         # 시스템 프롬프트 구성 (prompt4 - 최적화 버전)
         all_citations = []  # 테스트 환경에서는 citations 수집 안 함
+        
+        print(f"📋 [프롬프트 생성: prompt4 기본]")
         
         system_prompt = f"""
 당신은 대한민국 상위 1% 입시 컨설팅 리포트의 [수석 에디터]입니다.
@@ -120,6 +139,11 @@ class FinalAgent:
 {results_text}
 """
 
+        print(f"   프롬프트 길이: {len(system_prompt)}자")
+        print(f"   📄 최종 프롬프트 미리보기:")
+        print(f"   {system_prompt[:500]}...")
+        print("="*80)
+
         try:
             response = self.model.generate_content(
                 system_prompt,
@@ -156,6 +180,8 @@ class FinalAgent:
             agent_name = result.get("agent", "Unknown")
             status = result.get("status", "unknown")
             content = result.get("result", "결과 없음")
+            
+            print(f"      {step_key}: agent={agent_name}, status={status}, content_length={len(str(content))}자")
 
             formatted.append(f"""### {step_key} ({agent_name})
 상태: {status}
@@ -163,6 +189,7 @@ class FinalAgent:
 {content}
 """)
 
+        print(f"      ✅ 포맷팅 완료: {len(formatted)}개 결과")
         return "\n---\n".join(formatted)
 
     def _format_answer_structure(self, structure: List[Dict]) -> str:
@@ -174,11 +201,14 @@ class FinalAgent:
             sec_type = section.get("type", "unknown")
             source = section.get("source_from", "없음")
             instruction = section.get("instruction", "")
+            
+            print(f"      섹션{sec_num}: type={sec_type}, source_from={source}")
 
             formatted.append(f"""**섹션 {sec_num}** [{sec_type}]
 - 참조할 데이터: {source if source else "없음 (직접 작성)"}
 - 지시사항: {instruction}""")
 
+        print(f"      ✅ Answer Structure 포맷팅 완료")
         return "\n\n".join(formatted)
 
     def _generate_fallback_answer(

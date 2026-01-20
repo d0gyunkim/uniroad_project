@@ -60,7 +60,20 @@ const InputNodeComponent = memo(({ id, data, selected }: NodeProps) => {
         rows={3}
         onClick={(e) => e.stopPropagation()}
       />
-      <Handle type="source" position={Position.Right} id="message" style={{ backgroundColor: '#22c55e', width: 14, height: 14 }} />
+      <Handle type="source" position={Position.Right} id="message" style={{ backgroundColor: '#22c55e', width: 14, height: 14, top: '50%' }} />
+    </div>
+  );
+});
+
+// Final Input Node 컴포넌트
+const FinalInputNodeComponent = memo(({ id, data, selected }: NodeProps) => {
+  return (
+    <div className={`px-4 py-3 rounded-lg shadow-lg border-2 min-w-[220px] bg-purple-50 border-purple-400 ${selected ? 'ring-4 ring-purple-500 shadow-2xl' : ''}`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-bold text-purple-700">Final Agent Input</div>
+      </div>
+      <div className="text-xs text-gray-600 mb-2">Final Agent 직접 테스트</div>
+      <Handle type="source" position={Position.Right} id="output" style={{ backgroundColor: '#9333ea', width: 14, height: 14, top: '50%' }} />
     </div>
   );
 });
@@ -68,6 +81,7 @@ const InputNodeComponent = memo(({ id, data, selected }: NodeProps) => {
 // Node Types (컴포넌트 외부 정의 - 안정적 참조)
 const staticNodeTypes = {
   input: InputNodeComponent,
+  finalInput: FinalInputNodeComponent,
 };
 
 // @ts-ignore
@@ -395,6 +409,23 @@ export default function AgentAdminPage() {
     setNodes((nds) => [...nds, newNode]);
   }, [setNodes, nodes]);
 
+  const addFinalInputNode = useCallback(() => {
+    const count = nodes.filter(n => n.type === 'finalInput').length + 1;
+    const newNode: Node = {
+      id: `final-input-${count}`,
+      type: 'finalInput',
+      position: { x: 300 + Math.random() * 50, y: 100 + Math.random() * 400 },
+      data: { 
+        label: `Final Input ${count}`,
+        user_question: '',
+        answer_structure: '[]',
+        sub_agent_results: '{}',
+        notes: ''
+      },
+    };
+    setNodes((nds) => [...nds, newNode]);
+  }, [setNodes, nodes]);
+
   // 단일 노드 실행
   const runSingleNode = async (nodeId: string) => {
     const node = nodes.find(n => n.id === nodeId);
@@ -454,10 +485,10 @@ export default function AgentAdminPage() {
   };
 
   const onNodeClick = useCallback(async (_: React.MouseEvent, node: Node) => {
-    setSelectedNode(node);
     setShowPromptEditor(false);
     
     if (node.type === 'output' && node.data.value) {
+      setSelectedNode(node);
       setOutputModalContent(node.data.value);
       setShowOutputModal(true);
       return;
@@ -466,27 +497,58 @@ export default function AgentAdminPage() {
     if (node.type === 'agent') {
       try {
         const agentId = node.data.id;
+        
+        // 프롬프트 목록 불러오기
         const response = await axios.get(`${API_BASE}/api/agent/prompts/${agentId}`);
         const prompts = response.data.prompts as PromptInfo[];
         setPromptList(prompts);
         
         if (prompts.length > 0) {
-          const firstPrompt = prompts[0];
-          setSelectedPromptKey(firstPrompt.key);
-          const contentResponse = await axios.get(`${API_BASE}/api/agent/prompts/${agentId}/${firstPrompt.key}`);
+          // 노드에 저장된 프롬프트 정보 (없으면 기본값 사용)
+          const promptKey = node.data.selectedPromptKey || prompts[0].key;
+          const version = node.data.selectedVersion || 'default';
+          
+          // state 즉시 업데이트 (이전 노드 정보가 보이지 않도록)
+          setSelectedPromptKey(promptKey);
+          setSelectedVersion(version);
+          
+          // 노드 데이터에 저장 (처음 선택한 경우)
+          if (!node.data.selectedPromptKey || !node.data.selectedVersion) {
+            setNodes((nds) => nds.map((n) => 
+              n.id === node.id 
+                ? { ...n, data: { ...n.data, selectedPromptKey: promptKey, selectedVersion: version } }
+                : n
+            ));
+          }
+          
+          // 프롬프트 내용 불러오기
+          const contentResponse = await axios.get(`${API_BASE}/api/agent/prompts/${agentId}/${promptKey}${version !== 'default' ? `?version=${version}` : ''}`);
           setPromptContent(contentResponse.data.content);
-          setSelectedVersion('default');
         }
+        
+        // 노드 선택은 마지막에 설정 (UI 업데이트 순서 보장)
+        setSelectedNode(node);
       } catch (error) {
         console.error('Failed to load prompt:', error);
         setPromptContent('프롬프트를 불러올 수 없습니다.');
+        setSelectedNode(node);
       }
+    } else {
+      setSelectedNode(node);
     }
   }, []);
 
   const handlePromptKeyChange = async (promptKey: string) => {
     if (!selectedNode || selectedNode.type !== 'agent') return;
     setSelectedPromptKey(promptKey);
+    
+    // 노드 데이터에 선택된 프롬프트 키 저장
+    setNodes((nds) => nds.map((n) => 
+      n.id === selectedNode.id 
+        ? { ...n, data: { ...n.data, selectedPromptKey: promptKey, selectedVersion: 'default' } }
+        : n
+    ));
+    
     try {
       const agentId = selectedNode.data.id;
       const contentResponse = await axios.get(`${API_BASE}/api/agent/prompts/${agentId}/${promptKey}`);
@@ -776,6 +838,14 @@ export default function AgentAdminPage() {
 
   const selectVersion = async (versionId: string) => {
     if (!selectedNode || selectedNode.type !== 'agent') return;
+    
+    // 노드 데이터에 선택된 버전 저장
+    setNodes((nds) => nds.map((n) => 
+      n.id === selectedNode.id 
+        ? { ...n, data: { ...n.data, selectedVersion: versionId } }
+        : n
+    ));
+    
     try {
       const agentId = selectedNode.data.id;
       const response = await axios.get(`${API_BASE}/api/agent/prompts/${agentId}/${selectedPromptKey}?version=${versionId}`);
@@ -853,12 +923,15 @@ export default function AgentAdminPage() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'v' && copiedNodeRef.current) {
         const copied = copiedNodeRef.current;
         const newNodes: Node[] = [];
+        const idMapping: Record<string, string> = {}; // oldId -> newId 매핑
         
         // 여러 노드 복사
         if ((copied as any).multiple) {
           const nodesToCopy = (copied as any).multiple as Node[];
           nodesToCopy.forEach((copiedNode: Node) => {
-            const newId = getNextNodeId(copiedNode, nodes);
+            const newId = getNextNodeId(copiedNode, nodes, newNodes);
+            idMapping[copiedNode.id] = newId;
+            
             const newNode: Node = {
               ...copiedNode,
               id: newId,
@@ -876,10 +949,38 @@ export default function AgentAdminPage() {
             };
             newNodes.push(newNode);
           });
+          
+          // 복사된 노드들 간의 연결(edges) 찾아서 복사
+          const copiedNodeIds = new Set(nodesToCopy.map(n => n.id));
+          const newEdges: Edge[] = [];
+          
+          edges.forEach((edge) => {
+            // 소스와 타겟 모두 복사된 노드들에 포함된 경우에만 edge 복사
+            if (copiedNodeIds.has(edge.source) && copiedNodeIds.has(edge.target)) {
+              const newEdge: Edge = {
+                ...edge,
+                id: `e-${idMapping[edge.source]}-${idMapping[edge.target]}-${Date.now()}`,
+                source: idMapping[edge.source],
+                target: idMapping[edge.target]
+              };
+              newEdges.push(newEdge);
+            }
+          });
+          
+          // 노드와 엣지 모두 추가
+          setNodes((nds) => [
+            ...nds.map(n => ({ ...n, selected: false })),
+            ...newNodes
+          ]);
+          
+          if (newEdges.length > 0) {
+            setEdges((eds) => [...eds, ...newEdges]);
+            console.log('🔗 Pasted edges:', newEdges.map(e => `${e.source}->${e.target}`));
+          }
         } else {
           // 단일 노드 복사
           const copiedNode = copied as Node;
-          const newId = getNextNodeId(copiedNode, nodes);
+          const newId = getNextNodeId(copiedNode, nodes, newNodes);
           const newNode: Node = {
             ...copiedNode,
             id: newId,
@@ -896,30 +997,35 @@ export default function AgentAdminPage() {
             }
           };
           newNodes.push(newNode);
+          
+          // 기존 노드 선택 해제, 새 노드 추가
+          setNodes((nds) => [
+            ...nds.map(n => ({ ...n, selected: false })),
+            ...newNodes
+          ]);
         }
         
-        // 기존 노드 선택 해제, 새 노드 추가
-        setNodes((nds) => [
-          ...nds.map(n => ({ ...n, selected: false })),
-          ...newNodes
-        ]);
         console.log('📌 Pasted nodes:', newNodes.map(n => n.id));
       }
     };
     
     window.addEventListener('keydown', handleKeyboard);
     return () => window.removeEventListener('keydown', handleKeyboard);
-  }, [showFullPromptModal, showOutputModal, showQuestionModal, nodes, setNodes]);
+  }, [showFullPromptModal, showOutputModal, showQuestionModal, nodes, edges, setNodes, setEdges]);
 
   // 노드 ID 자동 증가 함수
-  const getNextNodeId = (node: Node, allNodes: Node[]): string => {
+  const getNextNodeId = (node: Node, allNodes: Node[], newNodes: Node[] = []): string => {
     if (node.type === 'input' || node.type === 'output') {
       // input-1, input-2, ... 형식
       const prefix = node.type;
-      const existingNumbers = allNodes
+      
+      // 기존 노드들과 새로 생성될 노드들의 번호 모두 확인
+      const allNodesToCheck = [...allNodes, ...newNodes];
+      const existingNumbers = allNodesToCheck
         .filter(n => n.id.startsWith(`${prefix}-`))
         .map(n => parseInt(n.id.split('-')[1]))
         .filter(n => !isNaN(n));
+      
       const maxNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
       return `${prefix}-${maxNumber + 1}`;
     } else {
@@ -950,13 +1056,21 @@ export default function AgentAdminPage() {
           <div className="h-full flex">
             <div className="w-56 bg-gray-50 border-r p-3 overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
-                <div className="text-xs font-semibold text-gray-600 uppercase">프롬프트</div>
+                <div className="text-xs font-bold text-gray-700 uppercase">프롬프트 관리</div>
                 <button onClick={() => setShowFullPromptModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
               </div>
-              {promptList.map((p) => (
-                <button key={p.key} onClick={() => handlePromptKeyChange(p.key)} className={`w-full text-left px-3 py-2 rounded text-sm mb-1 transition-colors ${selectedPromptKey === p.key ? 'bg-blue-500 text-white shadow-sm' : 'hover:bg-gray-200 text-gray-700'}`}>{p.name}</button>
-              ))}
-              <div className="text-xs font-semibold text-gray-600 mt-6 mb-2 uppercase">버전</div>
+              
+              {promptList.length > 1 && (
+                <>
+                  <div className="text-xs font-semibold text-gray-600 mb-2 uppercase">프롬프트 타입</div>
+                  {promptList.map((p) => (
+                    <button key={p.key} onClick={() => handlePromptKeyChange(p.key)} className={`w-full text-left px-3 py-2 rounded text-sm mb-1 transition-colors ${selectedPromptKey === p.key ? 'bg-blue-500 text-white shadow-sm' : 'hover:bg-gray-200 text-gray-700'}`}>{p.name}</button>
+                  ))}
+                  <div className="border-t my-4"></div>
+                </>
+              )}
+              
+              <div className="text-xs font-semibold text-gray-600 mb-2 uppercase">저장된 버전</div>
               {currentVersions.map((v) => (
                 <div key={v.version_id} className="flex items-center gap-1 mb-1">
                   <button onClick={() => selectVersion(v.version_id)} className={`flex-1 text-left px-3 py-2 rounded text-sm transition-colors ${selectedVersion === v.version_id ? 'bg-green-500 text-white shadow-sm' : 'hover:bg-gray-200 text-gray-700'}`}>
@@ -1091,6 +1205,21 @@ export default function AgentAdminPage() {
                 <span className="text-xs text-gray-500 px-1">{fontSize}px</span>
                 <button onClick={() => setFontSize(Math.min(24, fontSize + 2))} className="px-2 py-1 hover:bg-gray-200 rounded text-gray-600">A+</button>
               </div>
+              <button 
+                onClick={() => {
+                  const pre = document.getElementById('output-content');
+                  if (pre) {
+                    navigator.clipboard.writeText(pre.textContent || '').then(() => {
+                      alert('📋 클립보드에 복사되었습니다!');
+                    }).catch(() => {
+                      alert('❌ 복사에 실패했습니다.');
+                    });
+                  }
+                }} 
+                className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
+              >
+                📋 복사
+              </button>
               <button onClick={() => setShowOutputModal(false)} className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-medium">닫기</button>
             </div>
           </div>
@@ -1143,6 +1272,10 @@ export default function AgentAdminPage() {
                   <div className="font-medium text-sm text-blue-600">+ Output 추가</div>
                   <div className="text-xs text-gray-500 mt-1">결과 확인용 노드 추가</div>
                 </button>
+                <button onClick={addFinalInputNode} className="w-full text-left p-3 rounded-lg border border-purple-300 hover:shadow-md transition-shadow bg-purple-50">
+                  <div className="font-medium text-sm text-purple-600">+ Final Input 추가</div>
+                  <div className="text-xs text-gray-500 mt-1">Final Agent 직접 테스트</div>
+                </button>
               </div>
             </div>
           </div>
@@ -1153,9 +1286,6 @@ export default function AgentAdminPage() {
             <Background color="#e5e7eb" gap={20} />
             <Controls className="bg-white" />
           </ReactFlow>
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white px-4 py-2 rounded-lg shadow-lg border text-sm text-gray-600">
-            💡 Input 체크 → 메시지 입력 → 파이프라인 실행 (Orchestration이 판단한 에이전트만 실행됨)
-          </div>
         </main>
 
         <aside className="w-96 bg-white border-l overflow-y-auto">
@@ -1205,23 +1335,28 @@ export default function AgentAdminPage() {
                   {selectedNode.data.outputs?.map((output: string) => (<span key={output} className="text-xs px-2 py-1 bg-gray-100 rounded">{output}</span>))}
                 </div>
               </div>
-              {promptList.length > 1 && (
-                <div className="mb-4">
-                  <div className="text-xs font-medium text-gray-500 mb-1">프롬프트 선택</div>
-                  <select value={selectedPromptKey} onChange={(e) => handlePromptKeyChange(e.target.value)} className="w-full px-3 py-2 border rounded text-sm">
-                    {promptList.map((p) => (<option key={p.key} value={p.key}>{p.name}</option>))}
-                  </select>
-                </div>
-              )}
-              <div className="mb-4">
-                <div className="text-xs font-medium text-gray-500 mb-1">프롬프트 버전</div>
-                <div className="flex gap-2">
-                  <select value={selectedVersion} onChange={(e) => selectVersion(e.target.value)} className="flex-1 px-3 py-2 border rounded text-sm">
-                    {currentVersions.map((v) => (<option key={v.version_id} value={v.version_id}>{v.name} {v.created_at ? `(${new Date(v.created_at).toLocaleDateString('ko-KR')})` : ''}</option>))}
-                  </select>
-                  {selectedVersion !== 'default' && (
-                    <button onClick={() => deletePrompt(selectedVersion)} className="px-3 py-2 text-red-500 hover:bg-red-50 border border-red-300 rounded text-sm transition-colors" title="현재 버전 삭제">🗑️</button>
-                  )}
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
+                <div className="text-xs font-semibold text-gray-700 mb-3 uppercase">프롬프트 관리</div>
+                
+                {promptList.length > 1 && (
+                  <div className="mb-3">
+                    <div className="text-xs font-medium text-gray-600 mb-1.5">프롬프트 타입</div>
+                    <select value={selectedPromptKey} onChange={(e) => handlePromptKeyChange(e.target.value)} className="w-full px-3 py-2 border rounded text-sm bg-white">
+                      {promptList.map((p) => (<option key={p.key} value={p.key}>{p.name}</option>))}
+                    </select>
+                  </div>
+                )}
+                
+                <div>
+                  <div className="text-xs font-medium text-gray-600 mb-1.5">저장된 버전</div>
+                  <div className="flex gap-2">
+                    <select value={selectedVersion} onChange={(e) => selectVersion(e.target.value)} className="flex-1 px-3 py-2 border rounded text-sm bg-white">
+                      {currentVersions.map((v) => (<option key={v.version_id} value={v.version_id}>{v.name} {v.created_at ? `(${new Date(v.created_at).toLocaleDateString('ko-KR')})` : ''}</option>))}
+                    </select>
+                    {selectedVersion !== 'default' && (
+                      <button onClick={() => deletePrompt(selectedVersion)} className="px-3 py-2 text-red-500 hover:bg-red-50 border border-red-300 rounded text-sm transition-colors" title="현재 버전 삭제">🗑️</button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="mb-4">
@@ -1245,6 +1380,108 @@ export default function AgentAdminPage() {
                 )}
               </div>
               <button onClick={() => { setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id)); setEdges((eds) => eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)); setSelectedNode(null); }} className="w-full px-3 py-2 border border-red-300 text-red-500 rounded text-sm hover:bg-red-50">노드 삭제</button>
+            </div>
+          ) : selectedNode && selectedNode.type === 'finalInput' ? (
+            <div className="p-4">
+              <h2 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                🎯 {selectedNode.data.label}
+              </h2>
+              <p className="text-xs text-gray-500 mb-4">Final Agent를 직접 테스트합니다</p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">user_question (사용자 질문)</label>
+                  <textarea
+                    value={selectedNode.data.user_question || ''}
+                    onChange={(e) => {
+                      setNodes((nds) => nds.map((n) =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, user_question: e.target.value } }
+                          : n
+                      ));
+                    }}
+                    className="w-full h-20 px-3 py-2 border rounded text-sm resize-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="예: 서울대 26년 수시요강"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">answer_structure (JSON Array)</label>
+                  <textarea
+                    value={selectedNode.data.answer_structure || '[]'}
+                    onChange={(e) => {
+                      setNodes((nds) => nds.map((n) =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, answer_structure: e.target.value } }
+                          : n
+                      ));
+                    }}
+                    className="w-full h-32 px-3 py-2 border rounded text-sm resize-none focus:ring-2 focus:ring-purple-500 font-mono"
+                    placeholder='[{"section": 1, "type": "empathy", "source_from": null, "instruction": "..."}]'
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">sub_agent_results (JSON Object)</label>
+                  <textarea
+                    value={selectedNode.data.sub_agent_results || '{}'}
+                    onChange={(e) => {
+                      setNodes((nds) => nds.map((n) =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, sub_agent_results: e.target.value } }
+                          : n
+                      ));
+                    }}
+                    className="w-full h-40 px-3 py-2 border rounded text-sm resize-none focus:ring-2 focus:ring-purple-500 font-mono"
+                    placeholder='{"Step1": {"agent": "서울대 agent", "status": "success", "result": "..."}}'
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">notes (추가 지시사항)</label>
+                  <textarea
+                    value={selectedNode.data.notes || ''}
+                    onChange={(e) => {
+                      setNodes((nds) => nds.map((n) =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, notes: e.target.value } }
+                          : n
+                      ));
+                    }}
+                    className="w-full h-20 px-3 py-2 border rounded text-sm resize-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Final Agent에게 전달할 추가 지시사항"
+                  />
+                </div>
+              </div>
+
+              <button 
+                onClick={async () => {
+                  try {
+                    const answer_structure = JSON.parse(selectedNode.data.answer_structure || '[]');
+                    const sub_agent_results = JSON.parse(selectedNode.data.sub_agent_results || '{}');
+                    
+                    const response = await axios.post(`${API_BASE}/api/test/final-agent`, {
+                      user_question: selectedNode.data.user_question,
+                      answer_structure,
+                      sub_agent_results,
+                      notes: selectedNode.data.notes || ''
+                    });
+                    
+                    setOutputModalContent(response.data);
+                    setShowOutputModal(true);
+                    alert('✅ Final Agent 실행 완료!');
+                  } catch (error: any) {
+                    console.error('Final Agent 실행 실패:', error);
+                    alert(`❌ 실행 실패: ${error.response?.data?.detail || error.message}`);
+                  }
+                }}
+                className="w-full mt-4 px-3 py-2 bg-purple-500 text-white rounded text-sm hover:bg-purple-600 flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
+                Final Agent 실행
+              </button>
+
+              <button onClick={() => { setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id)); setEdges((eds) => eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)); setSelectedNode(null); }} className="w-full mt-2 px-3 py-2 border border-red-300 text-red-500 rounded text-sm hover:bg-red-50">노드 삭제</button>
             </div>
           ) : selectedNode && selectedNode.type === 'input' ? (
             <div className="p-4">
