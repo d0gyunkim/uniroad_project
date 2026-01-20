@@ -130,18 +130,34 @@ function findAndParseTable(text: string, keyPrefix: string): {
  * - | ... | 표 형식 → HTML 테이블
  */
 // 텍스트를 줄바꿈 포함하여 렌더링
+// • 로 시작하는 소분류 항목은 위아래 마진(mb-4) 적용
 function renderTextWithBreaks(text: string, keyPrefix: string): React.ReactNode[] {
   // 연속 줄바꿈을 하나로 정리
   const cleanedText = text.replace(/\n\s*\n/g, '\n').trim()
   if (!cleanedText) return []
   
   const lines = cleanedText.split('\n')
-  return lines.map((line, idx) => (
-    <React.Fragment key={`${keyPrefix}-${idx}`}>
-      {line}
-      {idx < lines.length - 1 && <br />}
-    </React.Fragment>
-  ))
+  return lines.map((line, idx) => {
+    const trimmedLine = line.trim()
+    const isBulletPoint = trimmedLine.startsWith('•') || trimmedLine.startsWith('-')
+    
+    if (isBulletPoint) {
+      // 소분류 항목: 위아래 마진 적용
+      return (
+        <div key={`${keyPrefix}-${idx}`} className="my-4">
+          {line}
+        </div>
+      )
+    }
+    
+    // 일반 텍스트
+    return (
+      <React.Fragment key={`${keyPrefix}-${idx}`}>
+        {line}
+        {idx < lines.length - 1 && <br />}
+      </React.Fragment>
+    )
+  })
 }
 
 function parseAndRenderMessage(
@@ -221,9 +237,9 @@ function parseAndRenderMessage(
 
       // 패턴 처리
       if (firstMatch.type === 'title' && titleMatch) {
-        // 【타이틀】 → 볼드 타이틀
+        // 【타이틀】 → 볼드 타이틀 (하단 여백 mb-4)
         paragraphResult.push(
-          <div key={`title-${keyIndex++}`} className="font-bold text-gray-900 mt-3 mb-1 text-lg leading-tight">
+          <div key={`title-${keyIndex++}`} className="font-bold text-gray-900 mt-3 mb-4 text-lg leading-tight">
             {titleMatch[1]}
           </div>
         )
@@ -277,9 +293,9 @@ function parseAndRenderMessage(
       }
     }
 
-    // 문단 결과 추가
+    // 문단 결과 추가 (섹션 간 여백 충분히, 마지막 섹션 제외)
     result.push(
-      <div key={`para-${paragraphIndex}`} className="mb-2">
+      <div key={`para-${paragraphIndex}`} className="mb-6 last:mb-0">
         {paragraphResult}
         {/* 문단 끝에 출처 표시 - 바로 붙임 */}
         {paragraphSources.length > 0 && (

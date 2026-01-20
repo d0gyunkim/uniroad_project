@@ -32,9 +32,10 @@ def set_log_callback(callback):
 
 def _log(msg: str):
     """로그 출력 및 콜백 호출"""
-    print(msg)
     if _log_callback:
         _log_callback(msg)
+    else:
+        print(msg)
 
 
 class FinalAgent:
@@ -54,7 +55,7 @@ class FinalAgent:
         1. ===SECTION_START===...===SECTION_END=== 패턴을 찾음
         2. 각 섹션 내의 모든 cite 태그에서 data-source, data-url 수집
         3. 섹션 끝에 수집한 cite 태그들을 빈 태그로 추가 (중복 제거)
-        4. 섹션 마커 제거하고 섹션들을 두 줄 바꿈으로 연결
+        4. 섹션 마커 제거하고 섹션들을 세 줄 바꿈으로 연결 (출처 포함 섹션 간 여백)
         """
         # 로그 추가
         _log("   [후처리] 원본 텍스트 길이: " + str(len(text)))
@@ -72,15 +73,15 @@ class FinalAgent:
                 _log(f"   [후처리] 빈 섹션 발견, 스킵")
                 continue
             
-            # cite 태그 찾기 (더 정확한 패턴)
-            cite_pattern = r'<cite\s+data-source="([^"]*)"\s+data-url="([^"]*)"\s*>.*?</cite>'
+            # cite 태그 찾기 (data-url은 선택적)
+            cite_pattern = r'<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>.*?</cite>'
             
             citations = []
             seen = set()
             
             for cite_match in re.finditer(cite_pattern, section_content, flags=re.DOTALL):
                 source = cite_match.group(1)
-                url = cite_match.group(2)
+                url = cite_match.group(2) or ""  # data-url이 없으면 빈 문자열
                 key = (source, url)
                 
                 if key not in seen and source:  # 중복 제거 및 빈 source 제외
@@ -111,8 +112,8 @@ class FinalAgent:
             _log("   [후처리] ⚠️ 섹션을 찾지 못함, 원본 반환")
             return text.strip()
         
-        # 섹션 간 두 줄 간격으로 연결
-        result = '\n\n'.join(sections)
+        # 섹션 간 세 줄 간격으로 연결 (출처 포함 섹션 아래 빈 줄 하나 추가)
+        result = '\n\n\n'.join(sections)
         
         _log("   [후처리] 처리된 섹션 수: " + str(len(sections)))
         _log("   [후처리] 최종 텍스트 길이: " + str(len(result)) + "자")
@@ -124,8 +125,8 @@ class FinalAgent:
         user_question: str,
         answer_structure: List[Dict],
         sub_agent_results: Dict[str, Any],
-        notes: str = "",
-        custom_prompt: str = None
+        custom_prompt: str = None,
+        history: List[Dict] = None
     ) -> Dict[str, Any]:
         """
         Answer Structure에 따라 최종 답변 생성
@@ -134,8 +135,8 @@ class FinalAgent:
             user_question: 원래 사용자 질문
             answer_structure: Orchestration Agent가 만든 답변 구조
             sub_agent_results: Sub Agent들의 실행 결과
-            notes: Orchestration Agent의 추가 지시사항
             custom_prompt: 커스텀 프롬프트 (선택)
+            history: 대화 히스토리 (최근 10개 대화)
 
         Returns:
             {
@@ -151,13 +152,16 @@ class FinalAgent:
         _log("📝 Final Agent 실행")
         _log("="*80)
         
+        # history를 user_question에 병합
+        user_question_with_context = self._merge_history_with_question(user_question, history)
+        
         # 입력 데이터 검증 로그
         _log(f"🔍 [입력 검증]")
         _log(f"   user_question: {user_question[:100]}..." if len(user_question) > 100 else f"   user_question: {user_question}")
+        _log(f"   history 대화 수: {len(history) if history else 0}")
         _log(f"   answer_structure 섹션 수: {len(answer_structure)}")
         _log(f"   sub_agent_results 키: {list(sub_agent_results.keys())}")
         _log(f"   custom_prompt 사용: {'✅ Yes' if custom_prompt else '❌ No (기본 prompt4 사용)'}")
-        _log(f"   notes: {notes if notes else '(없음)'}")
 
         # Sub Agent 결과 정리 + 출처 정보 수집
         results_text, all_sources, all_source_urls, all_citations = self._format_sub_agent_results(sub_agent_results)
@@ -165,40 +169,52 @@ class FinalAgent:
         # Answer Structure를 텍스트로 변환
         structure_text = self._format_answer_structure(answer_structure)
 
-        _log(f"   섹션 수: {len(answer_structure)}")
-        _log(f"   출처 수: {len(all_sources)}")
+        
+        # 🔍 테스트 환경용 복사 가능한 데이터 출력
+        import json as _json
+        _log(f"")
+        _log("=" * 80)
+        _log("📋 [Final Agent 입력 데이터 - 테스트 환경에 복사 가능]")
+        _log("=" * 80)
+        
+        # JSON 형식으로 출력 (복사해서 테스트 환경에 바로 사용 가능)
+        test_data = {
+            "user_question_with_context": user_question_with_context,
+            "structure_text": structure_text,
+            "results_text": results_text,
+            "all_citations": all_citations
+        }
+        
+        _log(f"\n--- 1. user_question_with_context ---")
+        _log(user_question_with_context)
+        _log(f"\n--- 2. structure_text ---")
+        _log(structure_text)
+        _log(f"\n--- 3. results_text ---")
+        _log(results_text)
+        _log(f"\n--- 4. all_citations (JSON) ---")
+        _log(_json.dumps(all_citations, ensure_ascii=False, indent=2))
+        _log("=" * 80)
 
         # 프롬프트 가져오기
         if custom_prompt:
-            _log(f"🎨 [커스텀 프롬프트 사용]")
-            _log(f"   프롬프트 길이: {len(custom_prompt)}자")
-            
+            _log(f"🎨 [커스텀 프롬프트 사용] 길이: {len(custom_prompt)}자")
             prompt = custom_prompt.format(
-                user_question=user_question,
+                user_question=user_question_with_context,
                 structure_text=structure_text,
                 results_text=results_text,
-                notes=notes,
-                all_citations="\n".join(all_citations)
+                all_citations="\n".join([str(c) for c in all_citations])
             )
-            
-            _log(f"   포맷 후 길이: {len(prompt)}자")
-            _log(f"   📄 최종 프롬프트 미리보기:")
-            _log(f"   {prompt[:500]}...")
-            print(f"🎨 Using custom prompt for final agent")
         else:
-            _log(f"📋 [기본 프롬프트 사용: prompt4]")
-            # 기본 프롬프트 사용 (prompt4)
+            _log(f"📋 [기본 프롬프트 사용: prompt5]")
             prompt = get_final_agent_prompt(
-                "prompt4",
-                user_question=user_question,
+                "prompt5",
+                user_question=user_question_with_context,
                 structure_text=structure_text,
                 results_text=results_text,
-                notes=notes,
                 all_citations=all_citations
             )
-            _log(f"   프롬프트 길이: {len(prompt)}자")
-            _log(f"   📄 최종 프롬프트 미리보기:")
-            _log(f"   {prompt[:500]}...")
+        
+        _log(f"   최종 프롬프트 길이: {len(prompt)}자")
 
         try:
             response = self.model.generate_content(
@@ -244,7 +260,7 @@ class FinalAgent:
                 "metadata": {
                     "sections_count": len(answer_structure),
                     "sub_agents_used": list(sub_agent_results.keys()),
-                    "notes": notes
+                    "history_count": len(history) if history else 0
                 }
             }
 
@@ -260,6 +276,46 @@ class FinalAgent:
                 "source_urls": all_source_urls,
                 "metadata": {}
             }
+
+    def _merge_history_with_question(self, user_question: str, history: List[Dict] = None) -> str:
+        """
+        대화 히스토리를 사용자 질문에 병합
+        
+        Args:
+            user_question: 현재 사용자 질문
+            history: 대화 히스토리 리스트 [{role: str, content: str}, ...]
+            
+        Returns:
+            맥락이 포함된 질문 문자열
+        """
+        if not history or len(history) == 0:
+            return user_question
+        
+        # 최근 10개 대화로 제한 (20개 메시지 = user + assistant 쌍)
+        recent_history = history[-20:] if len(history) > 20 else history
+        
+        # 히스토리 포맷팅
+        history_lines = []
+        for msg in recent_history:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if role == "user":
+                history_lines.append(f"[User] {content}")
+            elif role == "assistant":
+                # 답변은 너무 길면 잘라서 표시
+                truncated = content[:300] + "..." if len(content) > 300 else content
+                history_lines.append(f"[Assistant] {truncated}")
+        
+        if not history_lines:
+            return user_question
+        
+        _log(f"   📜 [대화 맥락 병합] {len(recent_history)}개 메시지 포함")
+        
+        return f"""## 이전 대화 맥락
+{chr(10).join(history_lines)}
+
+## 현재 질문
+{user_question}"""
 
     def _format_sub_agent_results(self, results: Dict[str, Any]) -> tuple:
         """
@@ -277,10 +333,6 @@ class FinalAgent:
             agent_name = result.get("agent", "Unknown")
             status = result.get("status", "unknown")
             content = result.get("result", "결과 없음")
-            
-            _log(f"      {step_key}: agent={agent_name}, status={status}, content_length={len(str(content))}자")
-            
-            _log(f"      {step_key}: agent={agent_name}, status={status}, content_length={len(str(content))}자")
             sources = result.get("sources", [])
             source_urls = result.get("source_urls", [])
             citations = result.get("citations", [])
@@ -305,14 +357,10 @@ class FinalAgent:
 {source_info}
 """)
 
-        _log(f"      ✅ 포맷팅 완료: {len(formatted)}개 결과, 총 출처 {len(all_sources)}개")
         return "\n---\n".join(formatted), all_sources, all_source_urls, all_citations
 
     def _format_answer_structure(self, structure: List[Dict]) -> str:
         """Answer Structure를 텍스트로 포맷"""
-        _log(f"   📋 [Answer Structure 포맷팅 시작]")
-        _log(f"      섹션 수: {len(structure)}")
-        
         formatted = []
 
         for section in structure:
@@ -321,15 +369,12 @@ class FinalAgent:
             title = section.get("title", "")
             source = section.get("source_from", "없음")
             instruction = section.get("instruction", "")
-
-            _log(f"      섹션{sec_num}: type={sec_type}, source_from={source}, title={title[:30] if title else 'N/A'}...")
             
             formatted.append(f"""**섹션 {sec_num}** [{sec_type}]
 - 타이틀: {title if title else "(타이틀 없음)"}
 - 참조할 데이터: {source if source else "없음 (직접 작성)"}
 - 지시사항: {instruction}""")
 
-        _log(f"      ✅ 포맷팅 완료")
         return "\n\n".join(formatted)
 
     def _generate_fallback_answer(
@@ -366,12 +411,12 @@ async def generate_final_answer(
     user_question: str,
     answer_structure: List[Dict],
     sub_agent_results: Dict[str, Any],
-    notes: str = ""
+    history: List[Dict] = None
 ) -> Dict[str, Any]:
     """Final Agent를 통해 최종 답변 생성"""
     return await final_agent.generate_final_answer(
         user_question=user_question,
         answer_structure=answer_structure,
         sub_agent_results=sub_agent_results,
-        notes=notes
+        history=history
     )

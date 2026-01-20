@@ -56,6 +56,10 @@ AVAILABLE_AGENTS = [
 # Orchestration Agent 시스템 프롬프트
 ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchestration Agent (총괄 설계자 & PD)**입니다.
 
+## 기본 설정
+- **현재 시점:** 2026년 1월 (2026학년도 정시 진행 중)
+- **검색 기준:** 사용자가 "작년 입결/결과"를 물으면 반드시 **[2025학년도]** 키워드로 쿼리를 생성하세요. (2026학년도는 결과 미확정, 2024학년도는 재작년임)
+
 ## 역할
 학생의 질문을 분석하여 두 가지를 결정합니다:
 1. **Execution Plan**: 어떤 Sub Agent를 어떤 순서로 호출할지
@@ -78,7 +82,6 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 
 ```json
 {{
-  "plan_id": "unique_plan_id",
   "user_intent": "사용자 의도 요약",
   "execution_plan": [
     {{
@@ -91,12 +94,10 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
     {{
       "section": 1,
       "type": "섹션 타입",
-      "title": "섹션 제목 (볼드체로 표시됨)",
       "source_from": "Step{{N}}_Result 또는 null",
       "instruction": "이 섹션에서 다룰 내용에 대한 구체적 지시"
     }}
-  ],
-  "notes": "Final Agent에게 전달할 추가 지시사항"
+  ]
 }}
 ```
 
@@ -107,7 +108,6 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 4. fact_check나 analysis가 있으면 반드시 해당 데이터를 가져올 execution_plan이 있어야 함
 5. source_from은 execution_plan의 step 번호와 매칭되어야 함 (예: "Step1_Result")
 6. agent 필드에는 가용 에이전트 목록에 있는 에이전트 이름만 사용
-7. title 필드는 해당 섹션의 제목으로, 【】 기호로 감싸서 볼드체로 표시됨
 
 ## 간결성 원칙 (매우 중요!)
 - **불필요한 agent 호출 금지**: 간단한 질문에 여러 agent를 호출하지 마세요. 질문의 복잡도에 비례하여 최소한의 agent만 호출하세요.
@@ -164,9 +164,10 @@ def set_log_callback(callback):
 
 def _log(msg: str):
     """로그 출력 및 콜백 호출"""
-    print(msg)
     if _log_callback:
         _log_callback(msg)
+    else:
+        print(msg)
 
 async def run_orchestration_agent_with_prompt(
     message: str, 
@@ -183,11 +184,9 @@ async def run_orchestration_agent_with_prompt(
         
     Returns:
         {
-            "plan_id": str,
             "user_intent": str,
             "execution_plan": List[Dict],
-            "answer_structure": List[Dict],
-            "notes": str
+            "answer_structure": List[Dict]
         }
     """
     
@@ -255,11 +254,9 @@ async def run_orchestration_agent(
         
     Returns:
         {
-            "plan_id": str,
             "user_intent": str,
             "execution_plan": List[Dict],
-            "answer_structure": List[Dict],
-            "notes": str
+            "answer_structure": List[Dict]
         }
     """
     

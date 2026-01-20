@@ -36,9 +36,10 @@ def set_log_callback(callback):
 
 def _log(msg: str):
     """로그 출력 및 콜백 호출"""
-    print(msg)
     if _log_callback:
         _log_callback(msg)
+    else:
+        print(msg)
 
 load_dotenv()
 

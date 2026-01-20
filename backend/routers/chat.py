@@ -59,8 +59,9 @@ async def chat(request: ChatRequest):
         session_id = request.session_id
         message = request.message
         
-        # 중복 호출 방지 체크
+        # 중복 호출 방지 체크 및 시간 측정 시작
         import time
+        pipeline_start = time.time()
         request_id = f"{session_id}:{message}:{int(time.time())}"
         print(f"\n🔵 [REQUEST_START] {request_id}")
 
@@ -98,7 +99,9 @@ async def chat(request: ChatRequest):
         sub_agents.set_log_callback(log_and_emit)
         final_agent.set_log_callback(log_and_emit)
         
+        orch_start = time.time()
         orchestration_result = await run_orchestration_agent(message, history)
+        orch_time = time.time() - orch_start
 
         if "error" in orchestration_result:
             error_msg = f"❌ Orchestration 오류: {orchestration_result.get('error')}"
@@ -114,13 +117,13 @@ async def chat(request: ChatRequest):
 
         execution_plan = orchestration_result.get("execution_plan", [])
         answer_structure = orchestration_result.get("answer_structure", [])
-        notes = orchestration_result.get("notes", "")
         
         log_and_emit("")
         log_and_emit(f"📋 Orchestration 결과:")
         log_and_emit(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
         log_and_emit(f"   실행 계획: {len(execution_plan)}개 step")
         log_and_emit(f"   답변 구조: {len(answer_structure)}개 섹션")
+        log_and_emit(f"   ⏱️ 처리 시간: {orch_time:.2f}초")
         log_and_emit("="*80)
 
         # ========================================
@@ -135,15 +138,19 @@ async def chat(request: ChatRequest):
             log_and_emit(f"   Step {step['step']}: {step['agent']}")
             log_and_emit(f"   Query: {step['query']}")
         
+        sub_start = time.time()
         sub_agent_results = await execute_sub_agents(execution_plan)
+        sub_time = time.time() - sub_start
         
         log_and_emit("")
         for key, result in sub_agent_results.items():
             status = result.get('status', 'unknown')
             agent = result.get('agent', 'Unknown')
             sources_count = len(result.get('sources', []))
+            exec_time = result.get('execution_time', 0)
             status_icon = "✅" if status == "success" else "❌"
-            log_and_emit(f"{status_icon} {key} ({agent}): {status} (출처 {sources_count}개)")
+            log_and_emit(f"{status_icon} {key} ({agent}): {status} (출처 {sources_count}개, ⏱️ {exec_time:.2f}초)")
+        log_and_emit(f"   총 Sub Agents 처리 시간: {sub_time:.2f}초")
         log_and_emit("="*80)
 
         # ========================================
@@ -155,12 +162,14 @@ async def chat(request: ChatRequest):
         log_and_emit("="*80)
         log_and_emit(f"   섹션 수: {len(answer_structure)}")
         
+        final_start = time.time()
         final_result = await generate_final_answer(
             user_question=message,
             answer_structure=answer_structure,
             sub_agent_results=sub_agent_results,
-            notes=notes
+            history=history
         )
+        final_time = time.time() - final_start
 
         final_answer = final_result.get("final_answer", "답변 생성 실패")
         raw_answer = final_result.get("raw_answer", "")  # ✅ 원본 답변
@@ -169,6 +178,7 @@ async def chat(request: ChatRequest):
         
         log_and_emit(f"   최종 답변 길이: {len(final_answer)}자")
         log_and_emit(f"   원본 답변 길이: {len(raw_answer)}자")
+        log_and_emit(f"   ⏱️ 처리 시간: {final_time:.2f}초")
         log_and_emit("="*80)
 
         # 대화 이력에 추가
@@ -186,12 +196,21 @@ async def chat(request: ChatRequest):
             is_fact_mode=len(sources) > 0
         )
 
+        # 전체 파이프라인 시간 계산
+        pipeline_time = time.time() - pipeline_start
+        
         log_and_emit("")
         log_and_emit(f"{'#'*80}")
         log_and_emit(f"# ✅ 파이프라인 완료")
         log_and_emit(f"# 최종 답변 길이: {len(final_answer)}자")
         log_and_emit(f"# 원본 답변 길이: {len(raw_answer)}자")
         log_and_emit(f"# 출처 수: {len(sources)}개")
+        log_and_emit(f"#")
+        log_and_emit(f"# ⏱️ 처리 시간 분석:")
+        log_and_emit(f"#   • Orchestration: {orch_time:.2f}초 ({orch_time/pipeline_time*100:.1f}%)")
+        log_and_emit(f"#   • Sub Agents: {sub_time:.2f}초 ({sub_time/pipeline_time*100:.1f}%)")
+        log_and_emit(f"#   • Final Agent: {final_time:.2f}초 ({final_time/pipeline_time*100:.1f}%)")
+        log_and_emit(f"#   • 전체: {pipeline_time:.2f}초")
         log_and_emit(f"{'#'*80}")
         
         print(f"🟢 [REQUEST_END] {request_id}\n")
@@ -233,8 +252,9 @@ async def chat_stream(request: ChatRequest):
             session_id = request.session_id
             message = request.message
             
-            # 중복 호출 방지 체크
+            # 중복 호출 방지 체크 및 시간 측정 시작
             import time
+            pipeline_start = time.time()
             request_id = f"{session_id}:{message}:{int(time.time())}"
             print(f"\n🔵 [STREAM_REQUEST_START] {request_id}")
 
@@ -280,6 +300,7 @@ async def chat_stream(request: ChatRequest):
             final_agent.set_log_callback(log_callback)
             
             # Orchestration Agent 실행 (백그라운드)
+            orch_start = time.time()
             async def run_orch():
                 return await run_orchestration_agent(message, history)
             
@@ -299,6 +320,7 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
             
             orchestration_result = orch_task.result()
+            orch_time = time.time() - orch_start
 
             if "error" in orchestration_result:
                 error_msg = f"❌ Orchestration 오류: {orchestration_result.get('error')}"
@@ -318,13 +340,13 @@ async def chat_stream(request: ChatRequest):
 
             execution_plan = orchestration_result.get("execution_plan", [])
             answer_structure = orchestration_result.get("answer_structure", [])
-            notes = orchestration_result.get("notes", "")
             
             yield send_log("")
             yield send_log(f"📋 Orchestration 결과:")
             yield send_log(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
             yield send_log(f"   실행 계획: {len(execution_plan)}개 step")
             yield send_log(f"   답변 구조: {len(answer_structure)}개 섹션")
+            yield send_log(f"   ⏱️ 처리 시간: {orch_time:.2f}초")
             yield send_log("="*80)
 
             # ========================================
@@ -340,6 +362,7 @@ async def chat_stream(request: ChatRequest):
                 yield send_log(f"   Query: {step['query']}")
             
             # Sub Agents 실행 (백그라운드)
+            sub_start = time.time()
             async def run_subs():
                 return await execute_sub_agents(execution_plan)
             
@@ -359,14 +382,17 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
             
             sub_agent_results = subs_task.result()
+            sub_time = time.time() - sub_start
             
             yield send_log("")
             for key, result in sub_agent_results.items():
                 status = result.get('status', 'unknown')
                 agent = result.get('agent', 'Unknown')
                 sources_count = len(result.get('sources', []))
+                exec_time = result.get('execution_time', 0)
                 status_icon = "✅" if status == "success" else "❌"
-                yield send_log(f"{status_icon} {key} ({agent}): {status} (출처 {sources_count}개)")
+                yield send_log(f"{status_icon} {key} ({agent}): {status} (출처 {sources_count}개, ⏱️ {exec_time:.2f}초)")
+            yield send_log(f"   총 Sub Agents 처리 시간: {sub_time:.2f}초")
             yield send_log("="*80)
 
             # ========================================
@@ -379,12 +405,13 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"   섹션 수: {len(answer_structure)}")
             
             # Final Agent 실행 (백그라운드)
+            final_start = time.time()
             async def run_final():
                 return await generate_final_answer(
                     user_question=message,
                     answer_structure=answer_structure,
                     sub_agent_results=sub_agent_results,
-                    notes=notes
+                    history=history
                 )
             
             final_task = asyncio.create_task(run_final())
@@ -403,6 +430,7 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
             
             final_result = final_task.result()
+            final_time = time.time() - final_start
 
             final_answer = final_result.get("final_answer", "답변 생성 실패")
             raw_answer = final_result.get("raw_answer", "")  # ✅ 원본 답변
@@ -411,6 +439,7 @@ async def chat_stream(request: ChatRequest):
             
             yield send_log(f"   최종 답변 길이: {len(final_answer)}자")
             yield send_log(f"   원본 답변 길이: {len(raw_answer)}자")
+            yield send_log(f"   ⏱️ 처리 시간: {final_time:.2f}초")
             yield send_log("="*80)
 
             # 대화 이력에 추가
@@ -428,12 +457,21 @@ async def chat_stream(request: ChatRequest):
                 is_fact_mode=len(sources) > 0
             )
 
+            # 전체 파이프라인 시간 계산
+            pipeline_time = time.time() - pipeline_start
+            
             yield send_log("")
             yield send_log(f"{'#'*80}")
             yield send_log(f"# ✅ 파이프라인 완료")
             yield send_log(f"# 최종 답변 길이: {len(final_answer)}자")
             yield send_log(f"# 원본 답변 길이: {len(raw_answer)}자")
             yield send_log(f"# 출처 수: {len(sources)}개")
+            yield send_log(f"#")
+            yield send_log(f"# ⏱️ 처리 시간 분석:")
+            yield send_log(f"#   • Orchestration: {orch_time:.2f}초 ({orch_time/pipeline_time*100:.1f}%)")
+            yield send_log(f"#   • Sub Agents: {sub_time:.2f}초 ({sub_time/pipeline_time*100:.1f}%)")
+            yield send_log(f"#   • Final Agent: {final_time:.2f}초 ({final_time/pipeline_time*100:.1f}%)")
+            yield send_log(f"#   • 전체: {pipeline_time:.2f}초")
             yield send_log(f"{'#'*80}")
             
             print(f"🟢 [STREAM_REQUEST_END] {request_id}\n")

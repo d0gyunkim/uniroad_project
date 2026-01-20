@@ -553,7 +553,6 @@ def get_current_prompt(agent_id: str, prompt_key: str = "system") -> str:
                 user_question="[사용자 질문]",
                 structure_text="[답변 구조]",
                 results_text="[Sub Agent 결과]",
-                notes="",
                 all_citations=[]
             )
         except Exception as e:
@@ -804,7 +803,6 @@ async def execute_single_agent(agent_id: str, inputs: Dict[str, Any]) -> Dict[st
         user_question = inputs.get("user_question", "")
         answer_structure = inputs.get("answer_structure", [])
         sub_agent_results_raw = inputs.get("sub_agent_results", {})
-        notes = inputs.get("notes", "")
         
         # sub_agent_results 형식 정규화
         # 파이프라인에서 전달되는 형식이 dict일 수 있으므로 {"Step1": {...}} 형식으로 변환
@@ -834,12 +832,19 @@ async def execute_single_agent(agent_id: str, inputs: Dict[str, Any]) -> Dict[st
             # 커스텀 프롬프트로 실행
             from services.multi_agent.final_agent import final_agent
             result = await final_agent.generate_final_answer(
-                user_question, answer_structure, sub_agent_results, notes, custom_prompt
+                user_question=user_question,
+                answer_structure=answer_structure,
+                sub_agent_results=sub_agent_results,
+                custom_prompt=custom_prompt,
+                history=[]  # 관리자 페이지는 맥락 없음
             )
         else:
             # 기본 프롬프트로 실행
             result = await generate_final_answer(
-                user_question, answer_structure, sub_agent_results, notes
+                user_question=user_question,
+                answer_structure=answer_structure,
+                sub_agent_results=sub_agent_results,
+                history=[]  # 관리자 페이지는 맥락 없음
             )
         return result
     
