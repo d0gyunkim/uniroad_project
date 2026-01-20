@@ -42,27 +42,35 @@ app.add_middleware(
 # 대화 이력 저장 (메모리)
 conversation_history: Dict[str, List[Dict]] = {}
 
-# 가용 에이전트 목록
+# 가용 에이전트 목록 (5개 대학 + 컨설팅 + 선생님)
 AVAILABLE_AGENTS = [
     {
         "name": "서울대 agent",
-        "description": "서울대학교 입시 정보(입결, 모집요강, 전형별 정보)를 조회하는 에이전트"
-    },
-    {
-        "name": "고려대 agent",
-        "description": "고려대학교 입시 정보(입결, 모집요강, 전형별 정보)를 조회하는 에이전트"
+        "description": "서울대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "연세대 agent",
-        "description": "연세대학교 입시 정보(입결, 모집요강, 전형별 정보)를 조회하는 에이전트"
+        "description": "연세대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "고려대 agent",
+        "description": "고려대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "성균관대 agent",
+        "description": "성균관대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "경희대 agent",
+        "description": "경희대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
     {
         "name": "컨설팅 agent",
-        "description": "전국 대학별/전형별/학과별 합격 데이터를 비교 분석, 학생 성적 기반 합격 가능성 평가 및 대학 추천"
+        "description": "5개 대학(서울대/연세대/고려대/성균관대/경희대) 합격 데이터 비교 분석, 학생 성적 기반 합격 가능성 평가 및 대학 추천, 정시 점수 환산"
     },
     {
         "name": "선생님 agent",
-        "description": "현실적인 목표 설정 및 공부 계획 수립, 멘탈 관리 조언"
+        "description": "현실적인 목표 설정 및 공부 계획 수립, 멘탈 관리 조언, 학습 전략"
     },
 ]
 
@@ -78,13 +86,13 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 {agents}
 
 ## 답변 구조 섹션 타입
-- `empathy`: 학생의 마음에 공감하는 따뜻한 위로
-- `fact_check`: 정량적 데이터/팩트 제공 (입결, 경쟁률 등)
-- `analysis`: 학생 상황과 데이터 비교 분석
+- `empathy`: 학생의 마음에 공감하는 따뜻한 위로 (1-2문장)
+- `fact_check`: 정량적 데이터/팩트 제공 (입결, 경쟁률 등) - 출처 필요
+- `analysis`: 학생 상황과 데이터 비교 분석 - 출처 필요
 - `recommendation`: 구체적인 추천/제안
 - `next_step`: 추가 질문 유도 또는 다음 단계 안내
 - `warning`: 주의사항이나 리스크 안내
-- `encouragement`: 격려와 응원
+- `encouragement`: 격려와 응원 (1-2문장)
 
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
@@ -104,6 +112,7 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
     {{
       "section": 1,
       "type": "섹션 타입",
+      "title": "섹션 제목 (볼드체로 표시됨)",
       "source_from": "Step{{N}}_Result 또는 null",
       "instruction": "이 섹션에서 다룰 내용에 대한 구체적 지시"
     }}
@@ -119,12 +128,19 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 4. fact_check나 analysis가 있으면 반드시 해당 데이터를 가져올 execution_plan이 있어야 함
 5. source_from은 execution_plan의 step 번호와 매칭되어야 함 (예: "Step1_Result")
 6. agent 필드에는 가용 에이전트 목록에 있는 에이전트 이름만 사용
+7. title 필드는 해당 섹션의 제목으로, 【】 기호로 감싸서 볼드체로 표시됨
 
 ## 간결성 원칙 (매우 중요!)
 - **불필요한 agent 호출 금지**: 간단한 질문에 여러 agent를 호출하지 마세요. 질문의 복잡도에 비례하여 최소한의 agent만 호출하세요.
 - **불필요한 섹션 생성 금지**: 단순 인사나 가벼운 질문에 5개 섹션을 모두 채우지 마세요. 필요한 섹션만 간결하게 구성하세요.
 - 간단한 질문 = 1~2개 agent, 2~3개 섹션
 - 복잡한 비교/분석 질문 = 2개 이상 agent, 3~4개 섹션
+
+## 대학 매칭 규칙
+- 특정 대학이 언급되면 해당 대학 agent 호출
+- "서울대 연대 고대 비교" 같은 경우 여러 대학 agent 호출
+- 합격 가능성, 대학 추천, 점수 환산 질문은 컨설팅 agent 호출
+- 공부 계획, 멘탈 관리 질문은 선생님 agent 호출
 """
 
 

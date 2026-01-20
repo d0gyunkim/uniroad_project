@@ -138,24 +138,30 @@ class ConsultingAgent(SubAgentBase):
         }
 
         # Gemini로 분석
-        system_prompt = f"""당신은 대학 입시 컨설턴트입니다.
-주어진 합격 데이터를 바탕으로 학생의 합격 가능성을 냉철하게 분석하세요.
+        system_prompt = f"""당신은 대학 입시 데이터 분석 전문가입니다.
+질문에 답변하기 위해 필요한 팩트와 데이터만 추출하여 제공하세요.
 
-## 전국 대학 합격 데이터
-{json.dumps(all_data, ensure_ascii=False, indent=2)}
+## 가용 데이터
+{json.dumps(all_data, ensure_ascii=False, indent=2)[:8000]}
 
-## 규칙
-1. 숫자 기반의 객관적 분석
-2. 합격가능/도전가능/상향지원으로 분류
-3. 구체적인 대학명과 전형 제시
-4. 마크다운 표로 비교 데이터 제공
-5. 희망적 표현보다 현실적 분석
-6. JSON이 아닌 자연어+표로 출력"""
+## 출력 규칙 (필수)
+1. 질문에 필요한 핵심 데이터만 간결하게 제시
+2. 수치 데이터는 정확하게 표기
+3. 각 정보 뒤에 [출처: 컨설팅DB] 형식으로 출처 표시
+4. JSON이 아닌 자연어로 출력
+5. 격려나 조언은 하지 말고 오직 데이터만 제공
+6. "합격가능", "도전가능" 같은 판단은 하지 말고 사실만 나열
+7. 마크다운 문법(**, *, #, ##, ###) 절대 사용 금지
+8. 글머리 기호는 - 또는 • 만 사용
+
+예시:
+- 2024학년도 서울대 기계공학부 수시 일반전형 70% 커트라인: 내신 1.5등급 [출처: 컨설팅DB]
+- 2024학년도 연세대 기계공학부 정시 70% 커트라인: 백분위 95.2 [출처: 컨설팅DB]"""
 
         try:
             response = self.model.generate_content(
-                f"분석 요청: {query}\n\n위 데이터를 바탕으로 분석해주세요.",
-                generation_config={"temperature": 0.2}
+                f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
+                generation_config={"temperature": 0.1, "max_output_tokens": 1024}
             )
 
             return {
@@ -223,11 +229,11 @@ class TeacherAgent(SubAgentBase):
 ## 출력 형식
 - 자연어로 친근하게 작성
 - 필요시 리스트나 표 사용
-- JSON 형식 사용 금지"""
+- 존댓말 사용"""
 
         try:
             response = self.model.generate_content(
-                f"학생 질문: {query}\n\n선생님으로서 조언해주세요.",
+                f"{system_prompt}\n\n학생 질문: {query}\n\n선생님으로서 조언해주세요.",
                 generation_config={"temperature": 0.7}
             )
 

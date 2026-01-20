@@ -10,6 +10,9 @@ from typing import Dict, Any, List
 import json
 import os
 from dotenv import load_dotenv
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+from token_logger import log_token_usage
 
 load_dotenv()
 
@@ -165,12 +168,86 @@ def _log(msg: str):
     if _log_callback:
         _log_callback(msg)
 
+async def run_orchestration_agent_with_prompt(
+    message: str, 
+    history: List[Dict] = None,
+    custom_system_prompt: str = None
+) -> Dict[str, Any]:
+    """
+    커스텀 시스템 프롬프트를 사용한 Orchestration Agent 실행
+    
+    Args:
+        message: 사용자 질문
+        history: 대화 히스토리 (선택)
+        custom_system_prompt: 커스텀 시스템 프롬프트 (선택)
+        
+    Returns:
+        {
+            "plan_id": str,
+            "user_intent": str,
+            "execution_plan": List[Dict],
+            "answer_structure": List[Dict],
+            "notes": str
+        }
+    """
+    
+    if custom_system_prompt:
+        system_prompt = custom_system_prompt.format(
+            agents=format_agents_for_prompt()
+        )
+        print(f"🎨 Using custom system prompt for orchestration")
+    else:
+        system_prompt = ORCHESTRATION_SYSTEM_PROMPT.format(
+            agents=format_agents_for_prompt()
+        )
+    
+    model = genai.GenerativeModel(
+        model_name="gemini-3-flash-preview",
+        system_instruction=system_prompt
+    )
+
+    # 대화 이력 구성
+    gemini_history = []
+    if history:
+        for msg in history:
+            role = "user" if msg.get("role") == "user" else "model"
+            content = msg.get("content") or msg.get("parts", [""])[0]
+            if isinstance(content, list):
+                content = content[0] if content else ""
+            gemini_history.append({
+                "role": role,
+                "parts": [content]
+            })
+
+    chat = model.start_chat(history=gemini_history)
+    response = await chat.send_message_async(message)
+    
+    # 토큰 사용량 기록
+    if hasattr(response, 'usage_metadata'):
+        usage = response.usage_metadata
+        print(f"💰 토큰 사용량 (orchestration): {usage}")
+        
+        log_token_usage(
+            operation="오케스트레이션",
+            prompt_tokens=getattr(usage, 'prompt_token_count', 0),
+            output_tokens=getattr(usage, 'candidates_token_count', 0),
+            total_tokens=getattr(usage, 'total_token_count', 0),
+            model="gemini-3-flash-preview",
+            details="실행계획 수립"
+        )
+    
+    result_text = response.text.strip()
+
+    result = parse_orchestration_response(result_text)
+    return result
+
+
 async def run_orchestration_agent(
     message: str, 
     history: List[Dict] = None
 ) -> Dict[str, Any]:
     """
-    Orchestration Agent 실행
+    Orchestration Agent 실행 (기본 프롬프트 사용)
     
     Args:
         message: 사용자 질문
@@ -191,7 +268,7 @@ async def run_orchestration_agent(
     )
 
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-3-flash-preview",
         system_instruction=system_prompt
     )
 
@@ -217,6 +294,20 @@ async def run_orchestration_agent(
             timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
         )
     )
+    
+    # 토큰 사용량 기록
+    if hasattr(response, 'usage_metadata'):
+        usage = response.usage_metadata
+        print(f"💰 토큰 사용량 (orchestration_plan): {usage}")
+        
+        log_token_usage(
+            operation="오케스트레이션_계획",
+            prompt_tokens=getattr(usage, 'prompt_token_count', 0),
+            output_tokens=getattr(usage, 'candidates_token_count', 0),
+            total_tokens=getattr(usage, 'total_token_count', 0),
+            model="gemini-3-flash-preview",
+            details="실행계획 수립"
+        )
     
     result = parse_orchestration_response(response.text)
     

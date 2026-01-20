@@ -11,6 +11,9 @@ import os
 import re
 from dotenv import load_dotenv
 from .agent_prompts import get_final_agent_prompt
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+from token_logger import log_token_usage
 
 load_dotenv()
 
@@ -40,7 +43,7 @@ class FinalAgent:
     def __init__(self):
         self.name = "Final Agent"
         self.model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
+            model_name="gemini-3-flash-preview",
         )
 
     def _post_process_sections(self, text: str) -> str:
@@ -121,7 +124,8 @@ class FinalAgent:
         user_question: str,
         answer_structure: List[Dict],
         sub_agent_results: Dict[str, Any],
-        notes: str = ""
+        notes: str = "",
+        custom_prompt: str = None
     ) -> Dict[str, Any]:
         """
         Answer Structure에 따라 최종 답변 생성
@@ -131,6 +135,7 @@ class FinalAgent:
             answer_structure: Orchestration Agent가 만든 답변 구조
             sub_agent_results: Sub Agent들의 실행 결과
             notes: Orchestration Agent의 추가 지시사항
+            custom_prompt: 커스텀 프롬프트 (선택)
 
         Returns:
             {
@@ -155,15 +160,26 @@ class FinalAgent:
         _log(f"   섹션 수: {len(answer_structure)}")
         _log(f"   출처 수: {len(all_sources)}")
 
-        # 프롬프트 가져오기 (prompt4 사용 - 최적화 버전)
-        prompt = get_final_agent_prompt(
-            "prompt4",
-            user_question=user_question,
-            structure_text=structure_text,
-            results_text=results_text,
-            notes=notes,
-            all_citations=all_citations
-        )
+        # 프롬프트 가져오기
+        if custom_prompt:
+            prompt = custom_prompt.format(
+                user_question=user_question,
+                structure_text=structure_text,
+                results_text=results_text,
+                notes=notes,
+                all_citations="\n".join(all_citations)
+            )
+            print(f"🎨 Using custom prompt for final agent")
+        else:
+            # 기본 프롬프트 사용 (prompt4)
+            prompt = get_final_agent_prompt(
+                "prompt4",
+                user_question=user_question,
+                structure_text=structure_text,
+                results_text=results_text,
+                notes=notes,
+                all_citations=all_citations
+            )
 
         try:
             response = self.model.generate_content(
@@ -177,6 +193,20 @@ class FinalAgent:
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
             )
+
+            # 토큰 사용량 기록
+            if hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                print(f"💰 토큰 사용량 (final_agent): {usage}")
+                
+                log_token_usage(
+                    operation="최종답변생성",
+                    prompt_tokens=getattr(usage, 'prompt_token_count', 0),
+                    output_tokens=getattr(usage, 'candidates_token_count', 0),
+                    total_tokens=getattr(usage, 'total_token_count', 0),
+                    model="gemini-3-flash-preview",
+                    details="Final Agent"
+                )
 
             # 후처리: 섹션 마커 제거 및 cite 태그 정리
             raw_answer = response.text

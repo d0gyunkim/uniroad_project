@@ -11,6 +11,9 @@ import json
 import os
 import re
 from dotenv import load_dotenv
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+from token_logger import log_token_usage
 
 from services.supabase_client import supabase_service
 from services.gemini_service import gemini_service
@@ -48,11 +51,12 @@ if GEMINI_API_KEY:
 class SubAgentBase:
     """Sub Agent 기본 클래스"""
 
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str, custom_system_prompt: str = None):
         self.name = name
         self.description = description
+        self.custom_system_prompt = custom_system_prompt
         self.model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
+            model_name="gemini-3-flash-preview",
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -73,11 +77,12 @@ class UniversityAgent(SubAgentBase):
 
     SUPPORTED_UNIVERSITIES = ["서울대", "연세대", "고려대", "성균관대", "경희대"]
 
-    def __init__(self, university_name: str):
+    def __init__(self, university_name: str, custom_system_prompt: str = None):
         self.university_name = university_name
         super().__init__(
             name=f"{university_name} agent",
-            description=f"{university_name} 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+            description=f"{university_name} 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트",
+            custom_system_prompt=custom_system_prompt
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -328,10 +333,11 @@ class ConsultingAgent(SubAgentBase):
     5개 대학(서울대/연세대/고려대/성균관대/경희대) 데이터 사용
     """
 
-    def __init__(self):
+    def __init__(self, custom_system_prompt: str = None):
         super().__init__(
             name="컨설팅 agent",
-            description="5개 대학 합격 데이터 비교 분석, 합격 가능성 평가"
+            description="5개 대학 합격 데이터 비교 분석, 합격 가능성 평가",
+            custom_system_prompt=custom_system_prompt
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -364,7 +370,13 @@ class ConsultingAgent(SubAgentBase):
         } if (susi_data or jeongsi_data) else None
 
         # Gemini로 분석
-        system_prompt = f"""당신은 대학 입시 데이터 분석 전문가입니다.
+        if self.custom_system_prompt:
+            system_prompt = self.custom_system_prompt.format(
+                all_data=json.dumps(all_data, ensure_ascii=False, indent=2)[:8000]
+            )
+            print(f"🎨 Using custom system prompt for consulting agent")
+        else:
+            system_prompt = f"""당신은 대학 입시 데이터 분석 전문가입니다.
 질문에 답변하기 위해 필요한 팩트와 데이터만 추출하여 제공하세요.
 
 ## 가용 데이터
@@ -386,13 +398,27 @@ class ConsultingAgent(SubAgentBase):
 
         try:
             response = self.model.generate_content(
-                f"질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
+                f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
                 generation_config={"temperature": 0.1, "max_output_tokens": 1024},
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
             )
+
+            # 토큰 사용량 기록
+            if hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                print(f"💰 토큰 사용량 ({self.name}): {usage}")
+                
+                log_token_usage(
+                    operation="입결비교에이전트",
+                    prompt_tokens=getattr(usage, 'prompt_token_count', 0),
+                    output_tokens=getattr(usage, 'candidates_token_count', 0),
+                    total_tokens=getattr(usage, 'total_token_count', 0),
+                    model="gemini-3-flash-preview",
+                    details=self.name
+                )
 
             result_text = response.text
             
@@ -451,10 +477,11 @@ class ConsultingAgent(SubAgentBase):
 class TeacherAgent(SubAgentBase):
     """선생님 Agent - 학습 계획 및 멘탈 관리 조언"""
 
-    def __init__(self):
+    def __init__(self, custom_system_prompt: str = None):
         super().__init__(
             name="선생님 agent",
-            description="현실적인 목표 설정 및 공부 계획 수립, 멘탈 관리"
+            description="현실적인 목표 설정 및 공부 계획 수립, 멘탈 관리",
+            custom_system_prompt=custom_system_prompt
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -465,7 +492,11 @@ class TeacherAgent(SubAgentBase):
         _log("="*60)
         _log(f"쿼리: {query}")
 
-        system_prompt = """당신은 20년 경력의 입시 전문 선생님입니다.
+        if self.custom_system_prompt:
+            system_prompt = self.custom_system_prompt
+            print(f"🎨 Using custom system prompt for teacher agent")
+        else:
+            system_prompt = """당신은 20년 경력의 입시 전문 선생님입니다.
 학생의 상황을 파악하고 현실적이면서도 희망을 잃지 않는 조언을 해주세요.
 
 ## 조언 원칙
@@ -482,13 +513,27 @@ class TeacherAgent(SubAgentBase):
 
         try:
             response = self.model.generate_content(
-                f"학생 질문: {query}\n\n선생님으로서 조언해주세요.",
+                f"{system_prompt}\n\n학생 질문: {query}\n\n선생님으로서 조언해주세요.",
                 generation_config={"temperature": 0.7},
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
             )
+
+            # 토큰 사용량 기록
+            if hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                print(f"💰 토큰 사용량 ({self.name}): {usage}")
+                
+                log_token_usage(
+                    operation="선생님에이전트",
+                    prompt_tokens=getattr(usage, 'prompt_token_count', 0),
+                    output_tokens=getattr(usage, 'candidates_token_count', 0),
+                    total_tokens=getattr(usage, 'total_token_count', 0),
+                    model="gemini-3-flash-preview",
+                    details=self.name
+                )
 
             _log(f"   조언 완료")
             _log("="*60)

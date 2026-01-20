@@ -8,6 +8,10 @@ from config.constants import GEMINI_FLASH_MODEL, GEMINI_LITE_MODEL
 from config.logging_config import setup_logger
 from typing import Optional, List, Dict, Any
 import asyncio
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from token_logger import log_token_usage
 
 logger = setup_logger('gemini')
 
@@ -63,6 +67,29 @@ class GeminiService:
                 )
 
                 response = self.model.generate_content(full_prompt, request_options=request_options)
+
+                # 토큰 사용량 기록
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    prompt_tokens = getattr(usage, 'prompt_token_count', 0)
+                    output_tokens = getattr(usage, 'candidates_token_count', 0)
+                    total_tokens = getattr(usage, 'total_token_count', 0)
+                    
+                    print(f"💰 토큰 사용량 (generate): {usage}")
+                    logger.info(f"💰 토큰 사용량 - "
+                              f"입력: {prompt_tokens}, "
+                              f"출력: {output_tokens}, "
+                              f"총합: {total_tokens}")
+                    
+                    # CSV에 기록
+                    log_token_usage(
+                        operation="텍스트생성",
+                        prompt_tokens=prompt_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                        model=GEMINI_FLASH_MODEL,
+                        details=""
+                    )
 
                 # 빈 응답 체크
                 if not response.candidates or len(response.candidates) == 0:
@@ -162,6 +189,29 @@ class GeminiService:
                         await asyncio.sleep(0.5)  # 짧은 대기
 
                     response = chat.send_message(last_message, request_options=request_options)
+
+                    # 토큰 사용량 기록
+                    if hasattr(response, 'usage_metadata'):
+                        usage = response.usage_metadata
+                        prompt_tokens = getattr(usage, 'prompt_token_count', 0)
+                        output_tokens = getattr(usage, 'candidates_token_count', 0)
+                        total_tokens = getattr(usage, 'total_token_count', 0)
+                        
+                        print(f"💰 토큰 사용량 (chat_with_tools): {usage}")
+                        logger.info(f"💰 토큰 사용량 - "
+                                  f"입력: {prompt_tokens}, "
+                                  f"출력: {output_tokens}, "
+                                  f"총합: {total_tokens}")
+                        
+                        # CSV에 기록
+                        log_token_usage(
+                            operation="대화생성(Tools)",
+                            prompt_tokens=prompt_tokens,
+                            output_tokens=output_tokens,
+                            total_tokens=total_tokens,
+                            model=GEMINI_FLASH_MODEL,
+                            details=""
+                        )
 
                     # 전체 응답 디버깅
                     logger.info(f"Gemini 전체 응답 (시도 {attempt + 1}): {response}")
@@ -305,6 +355,30 @@ class GeminiService:
 
                 # Lite 모델로 빠르게 처리
                 response = self.lite_model.generate_content(full_prompt, request_options=request_options)
+                
+                # 토큰 사용량 기록
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    prompt_tokens = getattr(usage, 'prompt_token_count', 0)
+                    output_tokens = getattr(usage, 'candidates_token_count', 0)
+                    total_tokens = getattr(usage, 'total_token_count', 0)
+                    
+                    print(f"💰 토큰 사용량 (extract_info): {usage}")
+                    logger.info(f"💰 토큰 사용량 - "
+                              f"입력: {prompt_tokens}, "
+                              f"출력: {output_tokens}, "
+                              f"총합: {total_tokens}")
+                    
+                    # CSV에 기록
+                    log_token_usage(
+                        operation="문서정보추출",
+                        prompt_tokens=prompt_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                        model=GEMINI_LITE_MODEL,
+                        details=""
+                    )
+                
                 return response.text.strip()
                 
             except Exception as e:

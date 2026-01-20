@@ -10,6 +10,9 @@ from typing import Optional, List
 import tempfile
 import os
 import time
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from token_logger import log_token_usage
 
 logger = setup_logger('gemini_pdf')
 
@@ -69,7 +72,7 @@ class GeminiPDFService:
             end_page: 끝 페이지
 
         Returns:
-            (chunk_id, markdown_text)
+            (chunk_id, markdown_text, usage_metadata)
         """
         try:
             # 임시 파일로 저장
@@ -130,6 +133,31 @@ class GeminiPDFService:
                 gen_time = time.time() - gen_start
                 logger.info(f"   ✅ 청크 {chunk_id} Gemini 처리 완료 ({gen_time:.2f}초)")
                 
+                # 토큰 사용량 기록
+                usage_metadata = None
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    usage_metadata = {
+                        'prompt_tokens': getattr(usage, 'prompt_token_count', 0),
+                        'candidates_tokens': getattr(usage, 'candidates_token_count', 0),
+                        'total_tokens': getattr(usage, 'total_token_count', 0)
+                    }
+                    print(f"   💰 청크 {chunk_id} 토큰 사용량: {usage}")
+                    logger.info(f"   💰 청크 {chunk_id} 토큰 사용량 - "
+                              f"입력: {usage_metadata['prompt_tokens']}, "
+                              f"출력: {usage_metadata['candidates_tokens']}, "
+                              f"총합: {usage_metadata['total_tokens']}")
+                    
+                    # CSV에 기록
+                    log_token_usage(
+                        operation="PDF파싱_청크",
+                        prompt_tokens=usage_metadata['prompt_tokens'],
+                        output_tokens=usage_metadata['candidates_tokens'],
+                        total_tokens=usage_metadata['total_tokens'],
+                        model="gemini-2.5-flash-lite",
+                        details=f"청크 {chunk_id} (페이지 {start_page}-{end_page})"
+                    )
+                
                 markdown = response.text.strip()
                 
                 # 길이 제한 (비정상적으로 긴 결과 방지)
@@ -148,7 +176,7 @@ class GeminiPDFService:
                     pass
                 
                 logger.info(f"   ✅ 청크 {chunk_id} 완료 (페이지 {start_page}-{end_page}, {len(markdown)}자)")
-                return (chunk_id, markdown)
+                return (chunk_id, markdown, usage_metadata)
 
             finally:
                 # 임시 파일 삭제
@@ -156,7 +184,7 @@ class GeminiPDFService:
 
         except Exception as e:
             logger.error(f"   ❌ 청크 {chunk_id} 실패: {e}")
-            return (chunk_id, "")
+            return (chunk_id, "", None)
 
     async def parse_pdf(
         self,
@@ -253,7 +281,18 @@ class GeminiPDFService:
 
                 # 결과 정렬 및 병합
                 all_results.sort(key=lambda x: x[0])  # chunk_id로 정렬
-                markdown = "\n\n".join([text for _, text in all_results if text])
+                markdown = "\n\n".join([text for _, text, _ in all_results if text])
+                
+                # 토큰 사용량 집계
+                total_prompt_tokens = 0
+                total_candidates_tokens = 0
+                total_tokens = 0
+                
+                for _, _, usage in all_results:
+                    if usage:
+                        total_prompt_tokens += usage.get('prompt_tokens', 0)
+                        total_candidates_tokens += usage.get('candidates_tokens', 0)
+                        total_tokens += usage.get('total_tokens', 0)
 
             finally:
                 # 임시 파일 삭제
@@ -264,11 +303,37 @@ class GeminiPDFService:
             logger.info(f"✅ 파싱 완료!")
             logger.info(f"📝 결과 크기: {len(markdown) / 1024:.2f}KB")
             logger.info(f"⏱️  처리 시간: {processing_time:.2f}초 ({len(chunks)}개 청크 병렬)")
+            
+            # 총 토큰 사용량 출력
+            if total_tokens > 0:
+                print(f"\n{'=' * 60}")
+                print(f"💰 총 토큰 사용량 (PDF 파싱)")
+                print(f"   입력 토큰: {total_prompt_tokens:,}")
+                print(f"   출력 토큰: {total_candidates_tokens:,}")
+                print(f"   총 토큰: {total_tokens:,}")
+                print(f"{'=' * 60}\n")
+                
+                logger.info(f"💰 총 토큰 사용량 - 입력: {total_prompt_tokens:,}, 출력: {total_candidates_tokens:,}, 총합: {total_tokens:,}")
+                
+                # CSV에 총합 기록
+                log_token_usage(
+                    operation="PDF파싱_총합",
+                    prompt_tokens=total_prompt_tokens,
+                    output_tokens=total_candidates_tokens,
+                    total_tokens=total_tokens,
+                    model="gemini-2.5-flash-lite",
+                    details=f"{filename} ({total_pages}페이지, {len(chunks)}청크)"
+                )
 
             return {
                 'markdown': markdown,
                 'totalPages': total_pages,
-                'processingTime': processing_time
+                'processingTime': processing_time,
+                'tokenUsage': {
+                    'promptTokens': total_prompt_tokens,
+                    'candidatesTokens': total_candidates_tokens,
+                    'totalTokens': total_tokens
+                }
             }
 
         except Exception as e:
