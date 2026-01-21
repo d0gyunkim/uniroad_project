@@ -21,6 +21,11 @@ class SupabaseService:
             )
         return cls._instance
     
+    @property
+    def client(self) -> Client:
+        """인스턴스에서 client 속성으로 접근 가능하도록"""
+        return self.get_client()
+    
     @classmethod
     def upload_pdf_to_storage(
         cls,

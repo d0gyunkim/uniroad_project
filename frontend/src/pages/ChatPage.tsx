@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendMessageStream, ChatResponse } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
-import AgentPanel from '../components/AgentPanel'
+import ThinkingProcess from '../components/ThinkingProcess'
+import { useAuth } from '../contexts/AuthContext'
 
 interface Message {
   id: string
@@ -20,13 +21,61 @@ interface AgentData {
   logs: string[]
 }
 
+// 로그 메시지를 사용자 친화적으로 변환
+const formatLogMessage = (log: string): string => {
+  const logLower = log.toLowerCase()
+  
+  // 오케스트레이션 관련
+  if (logLower.includes('orchestration') && logLower.includes('start')) {
+    return '🔍 질문을 분석하는 중...'
+  }
+  if (logLower.includes('execution plan')) {
+    return '📋 답변 계획을 수립하는 중...'
+  }
+  
+  // 문서 검색 관련
+  if (logLower.includes('retriev') || logLower.includes('search') || logLower.includes('document')) {
+    return '📚 관련 문서를 찾고 있습니다...'
+  }
+  if (logLower.includes('found') && logLower.includes('document')) {
+    return '✅ 관련 자료를 찾았습니다!'
+  }
+  
+  // 에이전트 실행 관련
+  if (logLower.includes('agent') && (logLower.includes('start') || logLower.includes('running'))) {
+    return '⚙️ 전문 분석을 진행하는 중...'
+  }
+  if (logLower.includes('sub-agent') || logLower.includes('subagent')) {
+    return '🔬 세부 정보를 분석하는 중...'
+  }
+  
+  // 답변 생성 관련
+  if (logLower.includes('generat') || logLower.includes('final') || logLower.includes('compos')) {
+    return '✍️ 답변을 작성하고 있습니다...'
+  }
+  if (logLower.includes('complet') || logLower.includes('finish')) {
+    return '✨ 답변 준비 완료!'
+  }
+  
+  // RAG 관련
+  if (logLower.includes('rag') && logLower.includes('mode')) {
+    return '📖 문서 기반 답변을 준비하는 중...'
+  }
+  
+  // 기본값: 원본 로그 반환 (짧게 요약)
+  if (log.length > 50) {
+    return log.substring(0, 47) + '...'
+  }
+  return log
+}
+
 export default function ChatPage() {
   const navigate = useNavigate()
+  const { user, signOut } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId] = useState(() => `session-${Date.now()}`)
-  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
+  const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
   const [agentData, setAgentData] = useState<AgentData>({
     orchestrationResult: null,
     subAgentResults: null,
@@ -34,6 +83,7 @@ export default function ChatPage() {
     rawAnswer: null,
     logs: []
   })
+  const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
 
@@ -43,7 +93,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, currentLog]) // currentLog 변경시에도 스크롤
+
 
   const handleSend = async () => {
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
@@ -78,6 +129,7 @@ export default function ChatPage() {
       rawAnswer: null,
       logs: []
     })
+    setCurrentLog('🔍 질문을 분석하는 중...')
 
     try {
       await sendMessageStream(
@@ -89,6 +141,9 @@ export default function ChatPage() {
             ...prev,
             logs: [...prev.logs, log]
           }))
+          // 메인 채팅 영역에도 현재 로그 표시 (사용자 친화적으로 변환)
+          const formattedLog = formatLogMessage(log)
+          setCurrentLog(formattedLog)
         },
         // 결과 콜백
         (response: ChatResponse) => {
@@ -131,6 +186,7 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
+      setCurrentLog('')
       sendingRef.current = false
       console.log('✅ 메시지 전송 완료')
     }
@@ -144,53 +200,46 @@ export default function ChatPage() {
     }
   }
 
-  const toggleAgentPanel = () => {
-    setIsAgentPanelOpen(!isAgentPanelOpen)
-  }
 
   return (
     <div className="flex h-screen">
-      {/* Agent 디버그 패널 (좌측) */}
-      <AgentPanel
-        orchestrationResult={agentData.orchestrationResult}
-        subAgentResults={agentData.subAgentResults}
-        finalAnswer={agentData.finalAnswer}
-        rawAnswer={agentData.rawAnswer}
-        logs={agentData.logs}
-        isOpen={isAgentPanelOpen}
-        onClose={() => setIsAgentPanelOpen(false)}
-      />
-
       {/* 메인 채팅 영역 */}
-      <div className={`flex flex-col bg-gradient-to-br from-blue-50 to-indigo-100 transition-all duration-300 ${
-        isAgentPanelOpen ? 'w-1/2' : 'w-full'
-      }`}>
+      <div className="flex flex-col bg-gradient-to-br from-blue-50 to-indigo-100 transition-all duration-300 w-full">
         {/* 헤더 */}
         <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex justify-between items-center">
-          <div>
+          <div className="flex items-center gap-4">
             <img src="/로고.png" alt="UniZ Logo" className="h-16" />
           </div>
-          <div className="flex gap-2">
-            {/* Agent 버튼 */}
+          <div className="flex items-center gap-3">
+            {/* 사용자 정보 */}
+            <div className="text-sm text-gray-600">
+              {user?.name || user?.email}
+            </div>
+            
+            {/* 관리자 버튼 - 김도균만 표시 */}
+            {user?.name === '김도균' && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                관리자
+              </button>
+            )}
+            
+            {/* 로그아웃 버튼 */}
             <button
-              onClick={toggleAgentPanel}
-              className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                isAgentPanelOpen
-                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  : 'bg-slate-700 text-white hover:bg-slate-600'
-              }`}
+              onClick={() => {
+                if (confirm('로그아웃 하시겠습니까?')) {
+                  signOut()
+                  navigate('/auth')
+                }
+              }}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              title="로그아웃"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
-              Agent
-            </button>
-            {/* 관리자 버튼 */}
-            <button
-              onClick={() => navigate('/admin')}
-              className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              관리자
             </button>
           </div>
         </header>
@@ -246,13 +295,7 @@ export default function ChatPage() {
 
             {isLoading && (
               <div className="flex justify-start mb-4">
-                <div className="bg-gray-100 rounded-2xl px-4 py-3">
-                  <div className="flex space-x-2">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                  </div>
-                </div>
+                <ThinkingProcess logs={agentData.logs} />
               </div>
             )}
 
