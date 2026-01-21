@@ -1,13 +1,23 @@
 import React from 'react'
 
+interface UsedChunk {
+  id: string
+  content: string
+  title: string
+  source: string
+  file_url: string
+  metadata?: Record<string, any>
+}
+
 interface ChatMessageProps {
   message: string
   isUser: boolean
   sources?: string[]
   source_urls?: string[]
+  used_chunks?: UsedChunk[]
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, used_chunks }: ChatMessageProps) {
   const renderMessage = () => {
     if (isUser) {
       return <div className="whitespace-pre-wrap">{message}</div>
@@ -23,14 +33,102 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>
-      <div
-        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 text-sm sm:text-base ${
-          isUser
-            ? 'bg-blue-600 text-white shadow-sm'
-            : 'bg-white text-gray-900 shadow-sm'
-        }`}
-      >
-        {renderMessage()}
+      <div className="flex flex-col max-w-[85%] sm:max-w-[75%]">
+        <div
+          className={`rounded-2xl px-4 py-3 text-sm sm:text-base ${
+            isUser
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-white text-gray-900 shadow-sm'
+          }`}
+        >
+          {renderMessage()}
+        </div>
+        
+        {/* 팩트 체크 섹션 - 접을 수 있게 */}
+        {!isUser && used_chunks && used_chunks.length > 0 && (
+          <details className="mt-4 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden group">
+            {/* 헤더 (summary) */}
+            <summary className="bg-gray-50 px-4 py-3 border-b border-gray-200 cursor-pointer list-none">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded border-2 border-gray-400 flex items-center justify-center flex-shrink-0 group-open:bg-blue-100 group-open:border-blue-500 transition-colors">
+                    <svg className="w-3 h-3 text-gray-600 group-open:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">팩트 체크</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">답변에 인용된 부분이에요</p>
+                  </div>
+                </div>
+                <svg 
+                  className="w-5 h-5 text-gray-400 group-open:rotate-180 transition-transform flex-shrink-0" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </summary>
+            
+            {/* 청크 목록 (접혔을 때는 보이지 않음) */}
+            <div className="divide-y divide-gray-100">
+              {used_chunks.map((chunk, index) => {
+                const handleDownload = () => {
+                  // 청크 내용을 텍스트 파일로 다운로드
+                  const content = `제목: ${chunk.title || '문서 내용'}\n출처: ${chunk.source || ''}\n\n${chunk.content}`
+                  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+                  const url = URL.createObjectURL(blob)
+                  const link = document.createElement('a')
+                  link.href = url
+                  link.download = `${chunk.title || '문서'}_${index + 1}.txt`
+                  document.body.appendChild(link)
+                  link.click()
+                  document.body.removeChild(link)
+                  URL.revokeObjectURL(url)
+                }
+
+                return (
+                  <div key={chunk.id || index} className="px-4 py-4">
+                    {/* 출처 정보 */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs font-bold text-blue-700">
+                          {chunk.source ? chunk.source.charAt(0) : chunk.title ? chunk.title.charAt(0) : '문'}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-900 truncate">
+                          {chunk.title || '문서 내용'}
+                        </p>
+                        {chunk.source && (
+                          <p className="text-xs text-gray-500 truncate">{chunk.source}</p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* 청크 내용 */}
+                    <div className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed mb-3">
+                      {chunk.content}
+                    </div>
+                    
+                    {/* 자료 다운 버튼 */}
+                    <button
+                      onClick={handleDownload}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      자료 다운
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </details>
+        )}
       </div>
     </div>
   )
@@ -254,11 +352,22 @@ function parseAndRenderMessage(
         const sourceUrl = dataCiteMatch[2]
         const citedText = dataCiteMatch[3].trim()
 
-        // 텍스트만 추가 (빈 텍스트가 아닌 경우만)
+        // 인용된 텍스트를 시각적으로 강조 (배경색, 아이콘)
         if (citedText) {
           const textNodes = renderTextWithBreaks(citedText, `cite-${keyIndex}`)
           if (textNodes.length > 0) {
-            paragraphResult.push(<span key={`cite-${keyIndex++}`}>{textNodes}</span>)
+            paragraphResult.push(
+              <span 
+                key={`cite-${keyIndex++}`}
+                className="inline-flex items-center gap-1 bg-blue-50 text-blue-900 px-1.5 py-0.5 rounded border border-blue-200"
+                title={`인용: ${sourceText}`}
+              >
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                {textNodes}
+              </span>
+            )
           }
         }
 
@@ -275,11 +384,22 @@ function parseAndRenderMessage(
         const sourceText = sources && simpleCiteIndex < sources.length ? sources[simpleCiteIndex] : null
         const sourceUrl = source_urls && simpleCiteIndex < source_urls.length ? source_urls[simpleCiteIndex] : null
 
-        // 텍스트만 추가 (빈 텍스트가 아닌 경우만)
+        // 인용된 텍스트를 시각적으로 강조 (배경색, 아이콘)
         if (citedText) {
           const textNodes = renderTextWithBreaks(citedText, `scite-${keyIndex}`)
           if (textNodes.length > 0) {
-            paragraphResult.push(<span key={`cite-${keyIndex++}`}>{textNodes}</span>)
+            paragraphResult.push(
+              <span 
+                key={`cite-${keyIndex++}`}
+                className="inline-flex items-center gap-1 bg-blue-50 text-blue-900 px-1.5 py-0.5 rounded border border-blue-200"
+                title={sourceText ? `인용: ${sourceText}` : '인용된 내용'}
+              >
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                {textNodes}
+              </span>
+            )
           }
         }
 

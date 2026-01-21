@@ -6,12 +6,22 @@ import ThinkingProcess from '../components/ThinkingProcess'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 
+interface UsedChunk {
+  id: string
+  content: string
+  title: string
+  source: string
+  file_url: string
+  metadata?: Record<string, any>
+}
+
 interface Message {
   id: string
   text: string
   isUser: boolean
   sources?: string[]
   source_urls?: string[]
+  used_chunks?: UsedChunk[]
 }
 
 interface AgentData {
@@ -132,23 +142,29 @@ export default function ChatPage() {
     startNewChat()
   }
 
-  // 세션 선택 시 메시지 불러오기
+  // 세션 선택 시 메시지 불러오기 (세션 변경 시에만)
+  const prevSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
-    if (currentSessionId && isAuthenticated) {
-      // Supabase에서 불러온 메시지를 Message 형식으로 변환
-      const convertedMessages: Message[] = savedMessages.map((msg) => ({
-        id: msg.id,
-        text: msg.content,
-        isUser: msg.role === 'user',
-      }))
-      setMessages(convertedMessages)
-      setSessionId(currentSessionId) // API 호출용 sessionId도 업데이트
-    } else if (!currentSessionId) {
-      // 새 채팅인 경우
-      setMessages([])
-      setSessionId(`session-${Date.now()}`)
+    // 세션이 변경되었을 때만 메시지 로드
+    if (currentSessionId !== prevSessionIdRef.current) {
+      prevSessionIdRef.current = currentSessionId
+      
+      if (currentSessionId && isAuthenticated) {
+        // Supabase에서 불러온 메시지를 Message 형식으로 변환
+        const convertedMessages: Message[] = savedMessages.map((msg) => ({
+          id: msg.id,
+          text: msg.content,
+          isUser: msg.role === 'user',
+        }))
+        setMessages(convertedMessages)
+        setSessionId(currentSessionId) // API 호출용 sessionId도 업데이트
+      } else if (!currentSessionId) {
+        // 새 채팅인 경우
+        setMessages([])
+        setSessionId(`session-${Date.now()}`)
+      }
     }
-  }, [currentSessionId, savedMessages, isAuthenticated])
+  }, [currentSessionId, isAuthenticated]) // savedMessages 의존성 제거
 
   useEffect(() => {
     scrollToBottom()
@@ -186,18 +202,30 @@ export default function ChatPage() {
       }
     }
 
-    // 사용자 메시지 저장 (로그인한 경우)
-    if (isAuthenticated && currentSessionIdToUse) {
-      await saveMessage(currentSessionIdToUse, 'user', userInput)
-    }
-
     const userMessage: Message = {
       id: Date.now().toString(),
       text: userInput,
       isUser: true,
     }
 
-    setMessages((prev) => [...prev, userMessage])
+    // 사용자 메시지를 먼저 UI에 추가
+    setMessages((prev) => {
+      // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
+      const isDuplicate = prev.some(
+        (msg) => msg.isUser && msg.text === userInput && 
+        Date.now() - parseInt(msg.id) < 1000 // 1초 이내에 같은 메시지가 있으면 중복으로 간주
+      )
+      if (isDuplicate) {
+        console.log('🚫 중복 메시지 차단:', userInput)
+        return prev
+      }
+      return [...prev, userMessage]
+    })
+
+    // 사용자 메시지 저장 (로그인한 경우) - UI 업데이트 후
+    if (isAuthenticated && currentSessionIdToUse) {
+      await saveMessage(currentSessionIdToUse, 'user', userInput)
+    }
 
     // 로그 초기화
     setAgentData({
@@ -241,19 +269,34 @@ export default function ChatPage() {
             isUser: false,
             sources: response.sources,
             source_urls: response.source_urls,
+            used_chunks: response.used_chunks,
           }
 
-          setMessages((prev) => [...prev, botMessage])
+          // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
+          setMessages((prev) => {
+            const isDuplicate = prev.some(
+              (msg) => !msg.isUser && msg.text === response.response && 
+              Date.now() - parseInt(msg.id) < 2000 // 2초 이내에 같은 메시지가 있으면 중복으로 간주
+            )
+            if (isDuplicate) {
+              console.log('🚫 중복 답변 차단:', response.response.substring(0, 50))
+              return prev
+            }
+            return [...prev, botMessage]
+          })
 
           // 어시스턴트 메시지 저장 (로그인한 경우)
           if (isAuthenticated && currentSessionIdToUse) {
             await saveMessage(currentSessionIdToUse, 'assistant', response.response)
             
             // 첫 메시지인 경우 세션 제목 업데이트
-            if (messages.length === 0 && userInput) {
-              const title = userInput.substring(0, 50)
-              await updateSessionTitle(currentSessionIdToUse, title)
-            }
+            setMessages((prev) => {
+              if (prev.filter(m => m.isUser).length === 1 && userInput) {
+                const title = userInput.substring(0, 50)
+                updateSessionTitle(currentSessionIdToUse, title)
+              }
+              return prev
+            })
           }
 
           // Agent 디버그 데이터 업데이트
@@ -700,6 +743,7 @@ export default function ChatPage() {
                 isUser={msg.isUser}
                 sources={msg.sources}
                 source_urls={msg.source_urls}
+                used_chunks={msg.used_chunks}
               />
             ))}
 

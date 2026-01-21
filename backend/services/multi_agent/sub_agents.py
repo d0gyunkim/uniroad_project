@@ -242,7 +242,7 @@ class UniversityAgent(SubAgentBase):
                 
                 # 청크 가져오기
                 chunks_response = client.table('policy_documents')\
-                    .select('content, metadata')\
+                    .select('id, content, metadata')\
                     .eq('metadata->>fileName', filename)\
                     .execute()
                 
@@ -256,9 +256,27 @@ class UniversityAgent(SubAgentBase):
                     full_content += f"📄 {title}\n"
                     full_content += f"{'='*60}\n\n"
                     
+                    # 청크 정보 저장 (답변 추적용)
                     for chunk in sorted_chunks:
-                        full_content += chunk['content']
+                        chunk_content = chunk['content']
+                        full_content += chunk_content
                         full_content += "\n\n"
+                        
+                        # 각 청크 정보를 citations에 저장 (chunk 키로)
+                        # citations는 나중에 final_agent에서 추출됨
+                        chunk_info = {
+                            "id": chunk.get('id'),
+                            "content": chunk_content,
+                            "title": title,
+                            "source": doc.get('source', ''),
+                            "file_url": file_url,
+                            "metadata": chunk.get('metadata', {})
+                        }
+                        citations.append({
+                            "chunk": chunk_info,
+                            "source": title,  # 기존 형식 유지
+                            "url": file_url
+                        })
 
             # ============================================================
             # 4단계: 정보 추출
@@ -293,12 +311,7 @@ class UniversityAgent(SubAgentBase):
                     "문서 정보 추출 전문가"
                 )
 
-                # citations 구성 - 모든 사용된 출처에 대해 URL 매핑 제공
-                for source, url in zip(sources, source_urls):
-                    citations.append({
-                        "source": source,
-                        "url": url if url else ""
-                    })
+                # citations는 이미 청크 정보와 함께 추가되었으므로 추가 작업 불필요
 
             except Exception as e:
                 extracted_info = f"정보 추출 실패: {e}"

@@ -49,11 +49,21 @@ export interface SubAgentResult {
   }>
 }
 
+export interface UsedChunk {
+  id: string
+  content: string
+  title: string
+  source: string
+  file_url: string
+  metadata?: Record<string, any>
+}
+
 export interface ChatResponse {
   response: string
   raw_answer?: string  // ✅ Final Agent 원본 출력
   sources: string[]
   source_urls: string[]
+  used_chunks?: UsedChunk[]  // 답변에 사용된 청크
   // 멀티에이전트 디버그 데이터
   orchestration_result?: OrchestrationResult
   sub_agent_results?: Record<string, SubAgentResult>

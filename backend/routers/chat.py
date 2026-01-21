@@ -36,6 +36,7 @@ class ChatResponse(BaseModel):
     raw_answer: Optional[str] = None  # ✅ Final Agent 원본 출력
     sources: List[str] = []
     source_urls: List[str] = []
+    used_chunks: Optional[List[Dict[str, Any]]] = None  # 답변에 사용된 청크
     # 멀티에이전트 디버그 데이터
     orchestration_result: Optional[Dict[str, Any]] = None
     sub_agent_results: Optional[Dict[str, Any]] = None
@@ -220,6 +221,7 @@ async def chat(request: ChatRequest):
             raw_answer=raw_answer,  # ✅ 원본 답변 추가
             sources=sources,
             source_urls=source_urls,
+            used_chunks=final_result.get("used_chunks", []),  # 사용된 청크 추가
             orchestration_result=orchestration_result,
             sub_agent_results=sub_agent_results,
             metadata=final_result.get("metadata", {})
@@ -436,9 +438,11 @@ async def chat_stream(request: ChatRequest):
             raw_answer = final_result.get("raw_answer", "")  # ✅ 원본 답변
             sources = final_result.get("sources", [])
             source_urls = final_result.get("source_urls", [])
+            used_chunks = final_result.get("used_chunks", [])
             
             yield send_log(f"   최종 답변 길이: {len(final_answer)}자")
             yield send_log(f"   원본 답변 길이: {len(raw_answer)}자")
+            yield send_log(f"   관련 청크 수: {len(used_chunks)}개")
             yield send_log(f"   ⏱️ 처리 시간: {final_time:.2f}초")
             yield send_log("="*80)
 
@@ -482,6 +486,7 @@ async def chat_stream(request: ChatRequest):
                 raw_answer=raw_answer,  # ✅ 원본 답변 추가
                 sources=sources,
                 source_urls=source_urls,
+                used_chunks=used_chunks,  # 사용된 청크 추가
                 orchestration_result=orchestration_result,
                 sub_agent_results=sub_agent_results,
                 metadata=final_result.get("metadata", {}),

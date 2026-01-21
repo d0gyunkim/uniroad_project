@@ -87,6 +87,57 @@ class AgentService:
 """
 
     @staticmethod
+    def _find_relevant_chunks(answer: str, chunks: List[Dict[str, Any]], max_chunks: int = 5) -> List[Dict[str, Any]]:
+        """
+        답변 내용과 관련된 청크를 찾습니다.
+        
+        Args:
+            answer: 생성된 답변
+            chunks: 검색된 모든 청크 목록
+            max_chunks: 반환할 최대 청크 수
+            
+        Returns:
+            관련 청크 목록 (유사도 순으로 정렬)
+        """
+        if not chunks or not answer:
+            return []
+        
+        # 답변에서 키워드 추출 (간단한 방법: 2글자 이상 단어)
+        import re
+        answer_lower = answer.lower()
+        answer_words = set(re.findall(r'\b\w{2,}\b', answer_lower))
+        
+        # 각 청크와의 유사도 계산
+        chunk_scores = []
+        for chunk in chunks:
+            chunk_content = chunk.get('content', '').lower()
+            chunk_words = set(re.findall(r'\b\w{2,}\b', chunk_content))
+            
+            # 공통 단어 수 계산
+            common_words = answer_words & chunk_words
+            if len(common_words) == 0:
+                continue
+            
+            # 유사도 점수: 공통 단어 비율 + 절대 개수
+            similarity = (len(common_words) / max(len(answer_words), 1)) * 0.5 + \
+                        (len(common_words) / max(len(chunk_words), 1)) * 0.5
+            
+            # 답변에 포함된 핵심 키워드가 청크에 있는지 확인
+            important_keywords = ['수', '명', '등급', '점', '년', '월', '일', '전형', '모집', '인원']
+            keyword_bonus = sum(1 for kw in important_keywords if kw in chunk_content and kw in answer_lower)
+            similarity += keyword_bonus * 0.1
+            
+            chunk_scores.append((similarity, chunk))
+        
+        # 유사도 순으로 정렬
+        chunk_scores.sort(key=lambda x: x[0], reverse=True)
+        
+        # 상위 N개 청크 반환
+        relevant_chunks = [chunk for score, chunk in chunk_scores[:max_chunks]]
+        
+        return relevant_chunks
+
+    @staticmethod
     async def search_documents(query: str) -> Dict[str, Any]:
         """
         문서 검색 도구 실행
@@ -110,7 +161,7 @@ class AgentService:
             metadata_response = client.table('documents_metadata').select('*').execute()
 
             if not metadata_response.data:
-                return {"found": False, "content": "", "sources": [], "source_urls": []}
+                return {"found": False, "content": "", "sources": [], "source_urls": [], "chunks": []}
 
             # 1단계: 해시태그 추출 (질문에서 키워드 분석)
             print(f"   📋 [1단계] 질문 분석 중...")
@@ -218,7 +269,7 @@ class AgentService:
             if not relevant_docs:
                 print("   ❌ 관련 문서 없음")
                 print(f"{'='*80}\n")
-                return {"found": False, "content": "", "sources": [], "source_urls": []}
+                return {"found": False, "content": "", "sources": [], "source_urls": [], "chunks": []}
 
             print(f"\n   ✅ 해시태그 매칭: {len(relevant_docs)}개 문서 후보")
 
@@ -272,7 +323,7 @@ class AgentService:
                 elif "없음" in filter_result.lower():
                     print("   ❌ 요약본 분석 결과: 관련 문서 없음")
                     print(f"{'='*80}\n")
-                    return {"found": False, "content": "", "sources": [], "source_urls": []}
+                    return {"found": False, "content": "", "sources": [], "source_urls": [], "chunks": []}
                 else:
                     # 번호 추출
                     import re
@@ -300,6 +351,7 @@ class AgentService:
             full_content = ""
             sources = []
             source_urls = []
+            all_chunks = []  # 청크 정보 저장 (답변 추적용)
 
             for idx, doc in enumerate(selected_docs, 1):  # 요약본 기반 선별된 문서
                 filename = doc['file_name']
@@ -315,7 +367,7 @@ class AgentService:
 
                 # 해당 문서의 모든 청크 가져오기
                 chunks_response = client.table('policy_documents')\
-                    .select('content, metadata')\
+                    .select('id, content, metadata')\
                     .eq('metadata->>fileName', filename)\
                     .execute()
 
@@ -333,11 +385,23 @@ class AgentService:
                     full_content += f"{'='*60}\n\n"
 
                     for chunk in sorted_chunks:
-                        full_content += chunk['content']
+                        chunk_content = chunk['content']
+                        full_content += chunk_content
                         full_content += "\n\n"
+                        
+                        # 청크 정보 저장 (답변 추적용)
+                        all_chunks.append({
+                            "id": chunk.get('id'),
+                            "content": chunk_content,
+                            "title": title,
+                            "source": doc.get('source', ''),
+                            "file_url": file_url,
+                            "metadata": chunk.get('metadata', {})
+                        })
 
             print(f"\n   📊 로드된 문서 내용:")
             print(f"       선별된 문서 수: {len(selected_docs)}개")
+            print(f"       총 청크 수: {len(all_chunks)}개")
             print(f"       총 길이: {len(full_content):,}자")
             print(f"       앞부분 미리보기 (300자):")
             print(f"       {'-'*60}")
@@ -349,13 +413,14 @@ class AgentService:
                 "found": True,
                 "content": full_content,
                 "sources": sources,
-                "source_urls": source_urls
+                "source_urls": source_urls,
+                "chunks": all_chunks  # 청크 정보 추가
             }
 
         except Exception as e:
             print(f"   ❌ 검색 오류: {e}")
             print(f"{'='*80}\n")
-            return {"found": False, "content": "", "sources": [], "source_urls": []}
+            return {"found": False, "content": "", "sources": [], "source_urls": [], "chunks": []}
 
     @staticmethod
     async def chat(user_message: str, history: List[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -390,6 +455,7 @@ class AgentService:
         sources = []
         source_urls = []
         used_search = False
+        all_search_chunks = []  # 모든 검색된 청크 저장
 
         for turn in range(5):
             print(f"{'~'*80}")
@@ -415,13 +481,26 @@ class AgentService:
                 print(f"{'-'*80}")
                 print(f"{response['content']}")
                 print(f"{'-'*80}")
+                
+                # 답변에 사용된 청크 찾기
+                used_chunks = []
+                if used_search and all_search_chunks:
+                    used_chunks = AgentService._find_relevant_chunks(
+                        response["content"],
+                        all_search_chunks
+                    )
+                    print(f"\n📚 관련 청크 찾기:")
+                    print(f"   전체 청크 수: {len(all_search_chunks)}개")
+                    print(f"   관련 청크 수: {len(used_chunks)}개")
+                
                 print(f"{'#'*80}\n")
 
                 return {
                     "response": response["content"],
                     "sources": sources,
                     "source_urls": source_urls,
-                    "used_search": used_search
+                    "used_search": used_search,
+                    "used_chunks": used_chunks  # 사용된 청크 추가
                 }
 
             elif response["type"] == "function_call":
@@ -439,6 +518,8 @@ class AgentService:
                     # 문서 검색 실행
                     search_result = await AgentService.search_documents(func_args["query"])
                     used_search = True
+                    search_chunks = search_result.get("chunks", [])  # 청크 정보 저장
+                    all_search_chunks.extend(search_chunks)  # 전체 청크 목록에 추가
 
                     if search_result["found"]:
                         sources.extend(search_result["sources"])
@@ -475,6 +556,7 @@ class AgentService:
                     else:
                         result_text = "관련 문서를 찾지 못했습니다. 일반적인 지식으로 답변해주세요."
                         result_text_summary = result_text
+                        search_chunks = []
                         print(f"\n   ⚠️ 문서를 찾지 못함 → 일반 지식으로 답변")
 
                     # Gemini SDK를 사용해서 function response 생성

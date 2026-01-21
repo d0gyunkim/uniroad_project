@@ -164,7 +164,7 @@ class FinalAgent:
         _log(f"   custom_prompt 사용: {'✅ Yes' if custom_prompt else '❌ No (기본 prompt4 사용)'}")
 
         # Sub Agent 결과 정리 + 출처 정보 수집
-        results_text, all_sources, all_source_urls, all_citations = self._format_sub_agent_results(sub_agent_results)
+        results_text, all_sources, all_source_urls, all_citations, all_chunks = self._format_sub_agent_results(sub_agent_results)
 
         # Answer Structure를 텍스트로 변환
         structure_text = self._format_answer_structure(answer_structure)
@@ -247,8 +247,14 @@ class FinalAgent:
             raw_answer = response.text
             final_answer = self._post_process_sections(raw_answer)
 
+            # 답변에 사용된 청크 찾기
+            used_chunks = []
+            if all_chunks:
+                used_chunks = self._find_relevant_chunks(final_answer, all_chunks)
+
             _log(f"   원본 답변 길이: {len(raw_answer)}자")
             _log(f"   후처리 답변 길이: {len(final_answer)}자")
+            _log(f"   관련 청크 수: {len(used_chunks)}개")
             _log("="*80)
 
             return {
@@ -257,6 +263,7 @@ class FinalAgent:
                 "raw_answer": raw_answer,  # ✅ 원본 추가
                 "sources": all_sources,
                 "source_urls": all_source_urls,
+                "used_chunks": used_chunks,  # 사용된 청크 추가
                 "metadata": {
                     "sections_count": len(answer_structure),
                     "sub_agents_used": list(sub_agent_results.keys()),
@@ -274,8 +281,137 @@ class FinalAgent:
                 ),
                 "sources": all_sources,
                 "source_urls": all_source_urls,
+                "used_chunks": [],
                 "metadata": {}
             }
+
+    def _find_relevant_chunks(self, answer: str, chunks: List[Dict[str, Any]], max_chunks: int = 3) -> List[Dict[str, Any]]:
+        """
+        답변 내용과 관련된 청크를 키워드 일치도로 찾습니다.
+        문서에 참고해서 답변한 내용의 키워드와 청크의 키워드 일치도 점수가 높은 상위 3개만 반환합니다.
+        
+        Args:
+            answer: 생성된 답변
+            chunks: 검색된 모든 청크 목록
+            max_chunks: 반환할 최대 청크 수 (기본값: 3)
+            
+        Returns:
+            관련 청크 목록 (키워드 일치도 점수 순으로 정렬, 상위 3개)
+        """
+        if not chunks or not answer:
+            return []
+        
+        answer_lower = answer.lower()
+        
+        # 답변에서 의미있는 키워드 추출 (2글자 이상, 불용어 제외)
+        stopwords = {'것', '수', '있', '없', '그', '이', '저', '때', '등', '및', '또', '또한', '또는', '그리고', '하지만', '그러나', '따라서', '그래서', '그런데', '그런', '이런', '저런', '이렇게', '그렇게', '저렇게', '이것', '그것', '저것', '이것은', '그것은', '저것은', '이것이', '그것이', '저것이', '이것을', '그것을', '저것을', '이것에', '그것에', '저것에', '이것의', '그것의', '저것의', '이것으로', '그것으로', '저것으로', '이것에서', '그것에서', '저것에서', '이것까지', '그것까지', '저것까지', '이것과', '그것과', '저것과', '이것만', '그것만', '저것만', '이것도', '그것도', '저것도', '이것부터', '그것부터', '저것부터', '이것까지', '그것까지', '저것까지'}
+        
+        # 답변에서 키워드 추출 (2글자 이상 단어, 불용어 제외)
+        answer_words = set()
+        for word in re.findall(r'\b\w{2,}\b', answer_lower):
+            if word not in stopwords and len(word) >= 2:
+                answer_words.add(word)
+        
+        # 답변에서 구체적인 수치 추출 (경쟁률, 등급, 백분위 등)
+        # 예: "19.3:1", "3.33등급", "13.1:1", "2.19등급" 등
+        numbers_pattern = r'\d+\.?\d*[:\d]*'
+        answer_numbers = set(re.findall(numbers_pattern, answer))
+        
+        # 핵심 키워드 목록 (입시 관련 중요 키워드)
+        important_keywords = ['경쟁률', '등급', '컷', '백분위', '전형', '모집', '인원', '충원', '물리', '응용물리', '학과', '전형', '수시', '정시', '학생부', '내신', '성적', '합격', '지원', '입시', '대학', '캠퍼스']
+        
+        # 대학명 및 학과명 키워드
+        university_keywords = ['서울대', '연세대', '고려대', '경희대', '성균관대', '한양대', '중앙대', '이화여대', '건국대', '동국대', '홍익대', '숙명여대', '국민대', '숭실대', '세종대', '단국대', '인하대', '아주대', '카이스트', '포스텍']
+        
+        # 각 청크와의 키워드 일치도 계산
+        chunk_scores = []
+        for chunk in chunks:
+            chunk_content = chunk.get('content', '')
+            chunk_content_lower = chunk_content.lower()
+            
+            # 청크에서 키워드 추출 (2글자 이상, 불용어 제외)
+            chunk_words = set()
+            for word in re.findall(r'\b\w{2,}\b', chunk_content_lower):
+                if word not in stopwords and len(word) >= 2:
+                    chunk_words.add(word)
+            
+            score = 0.0
+            
+            # 1. 구체적인 수치 매칭 (가장 중요) - 매우 높은 가중치
+            chunk_numbers = set(re.findall(numbers_pattern, chunk_content))
+            matching_numbers = answer_numbers & chunk_numbers
+            if matching_numbers:
+                # 수치가 일치하면 매우 높은 점수 (수치가 정확히 일치하는 것이 가장 중요)
+                score += len(matching_numbers) * 50.0
+                
+                # 실제로 사용된 수치가 많을수록 더 높은 점수
+                for num in matching_numbers:
+                    # 답변과 청크에서 해당 수치 주변 텍스트도 비교
+                    num_idx_answer = answer_lower.find(num)
+                    num_idx_chunk = chunk_content_lower.find(num)
+                    
+                    if num_idx_answer >= 0 and num_idx_chunk >= 0:
+                        # 수치 주변 30자 추출
+                        num_context_answer = answer_lower[max(0, num_idx_answer-30):num_idx_answer+len(num)+30]
+                        num_context_chunk = chunk_content_lower[max(0, num_idx_chunk-30):num_idx_chunk+len(num)+30]
+                        
+                        if num_context_answer and num_context_chunk:
+                            # 주변 텍스트도 유사하면 추가 점수
+                            context_words_answer = set(re.findall(r'\b\w{2,}\b', num_context_answer))
+                            context_words_chunk = set(re.findall(r'\b\w{2,}\b', num_context_chunk))
+                            common_context = context_words_answer & context_words_chunk
+                            score += len(common_context) * 3.0
+            
+            # 2. 공통 키워드 매칭 (키워드 일치도)
+            common_words = answer_words & chunk_words
+            if common_words:
+                # 키워드 일치도 점수 계산
+                # - 공통 키워드 수
+                # - 공통 키워드 비율 (답변 기준)
+                # - 공통 키워드 비율 (청크 기준)
+                common_count = len(common_words)
+                answer_ratio = common_count / max(len(answer_words), 1)
+                chunk_ratio = common_count / max(len(chunk_words), 1)
+                
+                # 키워드 일치도 점수 (가중 평균)
+                keyword_match_score = (common_count * 2.0) + (answer_ratio * 10.0) + (chunk_ratio * 10.0)
+                score += keyword_match_score
+            
+            # 3. 핵심 키워드 보너스 (입시 관련 중요 키워드)
+            important_matches = sum(1 for kw in important_keywords if kw in chunk_content_lower and kw in answer_lower)
+            score += important_matches * 5.0
+            
+            # 4. 대학명/학과명 매칭 보너스
+            for univ in university_keywords:
+                if univ in answer_lower and univ in chunk_content_lower:
+                    score += 10.0
+            
+            # 5. 답변에 <cite> 태그가 있고, 해당 출처가 청크의 문서와 일치하면 추가 점수
+            cite_pattern = r'<cite[^>]*data-source="([^"]*)"[^>]*>'
+            cited_sources = set(re.findall(cite_pattern, answer))
+            chunk_title = chunk.get('title', '').lower()
+            for cited_source in cited_sources:
+                if cited_source.lower() in chunk_title or chunk_title in cited_source.lower():
+                    score += 20.0  # 출처가 명시적으로 일치하면 매우 높은 점수
+            
+            # 점수가 0보다 큰 청크만 추가
+            if score > 0:
+                chunk_scores.append((score, chunk))
+        
+        # 키워드 일치도 점수 순으로 정렬
+        chunk_scores.sort(key=lambda x: x[0], reverse=True)
+        
+        # 상위 3개 청크만 반환 (점수가 높은 것만)
+        relevant_chunks = [chunk for score, chunk in chunk_scores[:max_chunks] if score > 0]
+        
+        # 로그 출력
+        if relevant_chunks:
+            _log(f"   📊 키워드 일치도 점수:")
+            for idx, (score, chunk) in enumerate(chunk_scores[:3], 1):
+                chunk_title = chunk.get('title', '제목 없음')
+                _log(f"      {idx}. {chunk_title[:50]}... (점수: {score:.2f})")
+        
+        return relevant_chunks
 
     def _merge_history_with_question(self, user_question: str, history: List[Dict] = None) -> str:
         """
@@ -322,12 +458,13 @@ class FinalAgent:
         Sub Agent 결과를 텍스트로 포맷하고 출처 정보 수집
 
         Returns:
-            (formatted_text, sources, source_urls, citations)
+            (formatted_text, sources, source_urls, citations, all_chunks)
         """
         formatted = []
         all_sources = []
         all_source_urls = []
         all_citations = []
+        all_chunks = []  # 모든 청크 정보 수집
 
         for step_key, result in results.items():
             agent_name = result.get("agent", "Unknown")
@@ -341,6 +478,11 @@ class FinalAgent:
             all_sources.extend(sources)
             all_source_urls.extend(source_urls)
             all_citations.extend(citations)
+            
+            # 청크 정보 수집 (citations에서 chunk 정보 추출)
+            for citation in citations:
+                if isinstance(citation, dict) and "chunk" in citation:
+                    all_chunks.append(citation["chunk"])
 
             # 출처 정보를 결과에 포함
             source_info = ""
@@ -357,7 +499,7 @@ class FinalAgent:
 {source_info}
 """)
 
-        return "\n---\n".join(formatted), all_sources, all_source_urls, all_citations
+        return "\n---\n".join(formatted), all_sources, all_source_urls, all_citations, all_chunks
 
     def _format_answer_structure(self, structure: List[Dict]) -> str:
         """Answer Structure를 텍스트로 포맷"""

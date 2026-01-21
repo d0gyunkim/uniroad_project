@@ -127,9 +127,6 @@ export function useChat() {
 
       if (error) throw error
 
-      // 메시지 목록 새로고침
-      await loadMessages(sessionId)
-
       // 세션의 updated_at 갱신
       await client
         .from('chat_sessions')
@@ -138,6 +135,9 @@ export function useChat() {
 
       // 세션 목록 새로고침
       await loadSessions()
+      
+      // 메시지 목록 새로고침 (UI 업데이트를 위해)
+      await loadMessages(sessionId)
     } catch (error) {
       console.error('메시지 저장 실패:', error)
     }
