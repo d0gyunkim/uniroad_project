@@ -22,12 +22,12 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
   }
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>
       <div
-        className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 text-sm sm:text-base ${
           isUser
-            ? 'bg-blue-600 text-white'
-            : 'bg-gray-100 text-gray-900'
+            ? 'bg-blue-600 text-white shadow-sm'
+            : 'bg-white text-gray-900 shadow-sm'
         }`}
       >
         {renderMessage()}
@@ -239,7 +239,7 @@ function parseAndRenderMessage(
       if (firstMatch.type === 'title' && titleMatch) {
         // 【타이틀】 → 볼드 타이틀 (하단 여백 mb-4)
         paragraphResult.push(
-          <div key={`title-${keyIndex++}`} className="font-bold text-gray-900 mt-3 mb-4 text-lg leading-tight">
+          <div key={`title-${keyIndex++}`} className="font-bold text-gray-900 mt-3 mb-4 text-base sm:text-lg leading-tight">
             {titleMatch[1]}
           </div>
         )
@@ -297,10 +297,9 @@ function parseAndRenderMessage(
     result.push(
       <div key={`para-${paragraphIndex}`} className="mb-6 last:mb-0">
         {paragraphResult}
-        {/* 문단 끝에 출처 표시 - 바로 붙임 */}
+        {/* 문단 끝에 출처 표시 - 깔끔하게 */}
         {paragraphSources.length > 0 && (
-          <div className="border-t border-gray-200 mt-1 pt-1 flex flex-wrap gap-1.5 items-center">
-            <span className="text-[10px] text-gray-500 font-medium">출처:</span>
+          <div className="mt-2 flex flex-wrap gap-1.5 items-center">
             {paragraphSources.map((source, idx) => (
               source.url ? (
                 <a
@@ -309,7 +308,7 @@ function parseAndRenderMessage(
                   download
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer transition-colors"
+                  className="inline-flex items-center px-2 py-1 text-xs font-bold text-gray-900 hover:text-gray-700 transition-colors"
                   title={`출처: ${source.text} (클릭하면 원본 파일 다운로드)`}
                 >
                   {source.text}
@@ -317,7 +316,7 @@ function parseAndRenderMessage(
               ) : (
                 <span
                   key={idx}
-                  className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-700 rounded"
+                  className="inline-flex items-center px-2 py-1 text-xs font-bold text-gray-900"
                 >
                   {source.text}
                 </span>

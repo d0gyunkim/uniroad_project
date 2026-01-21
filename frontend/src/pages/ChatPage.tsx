@@ -71,11 +71,12 @@ const formatLogMessage = (log: string): string => {
 
 export default function ChatPage() {
   const navigate = useNavigate()
-  const { user, signOut } = useAuth()
+  const { user, signOut, isAuthenticated } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
+  const [isSideNavOpen, setIsSideNavOpen] = useState(false)
   const [agentData, setAgentData] = useState<AgentData>({
     orchestrationResult: null,
     subAgentResults: null,
@@ -192,93 +193,292 @@ export default function ChatPage() {
     }
   }
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      console.log('⌨️ Enter 키 감지')
-      handleSend()
-    }
-  }
 
 
   return (
-    <div className="flex h-screen">
-      {/* 메인 채팅 영역 */}
-      <div className="flex flex-col bg-gradient-to-br from-blue-50 to-indigo-100 transition-all duration-300 w-full">
-        {/* 헤더 */}
-        <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <img src="/로고.png" alt="UniZ Logo" className="h-16" />
+    <div className="flex h-screen bg-gray-50 relative">
+      {/* 사이드 네비게이션 오버레이 */}
+      {isSideNavOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 sm:hidden"
+          onClick={() => setIsSideNavOpen(false)}
+        />
+      )}
+
+      {/* 사이드 네비게이션 */}
+      <div
+        className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
+          isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
+        } sm:translate-x-0 sm:static sm:w-80`}
+      >
+        <div className="h-full flex flex-col overflow-y-auto">
+          {/* 사이드 네비 헤더 */}
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xl font-bold text-gray-900">내 입시 기록 관리</h2>
+              <button
+                onClick={() => setIsSideNavOpen(false)}
+                className="sm:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-sm text-gray-500">
+              입시 기록을 입력하면 더 정확한 답변을 받을 수 있어요
+            </p>
           </div>
-          <div className="flex items-center gap-3">
-            {/* 사용자 정보 */}
-            <div className="text-sm text-gray-600">
-              {user?.name || user?.email}
+
+          {/* 메뉴 항목들 */}
+          <div className="flex-1 px-6 pb-6">
+            <div className="space-y-0">
+              {/* 내 생활기록부 관리 */}
+              <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">내 생활기록부 관리</p>
+                  <p className="text-xs text-gray-500 mt-0.5">10초만에 연동하기</p>
+                </div>
+                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              {/* 3월 6월 9월 모의고사 성적 입력 */}
+              <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">3월 6월 9월 모의고사 성적 입력</p>
+                  <p className="text-xs text-gray-500 mt-0.5">모의고사 성적을 입력해주세요</p>
+                </div>
+                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              {/* 내신 성적 입력 */}
+              <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">내신 성적 입력</p>
+                  <p className="text-xs text-gray-500 mt-0.5">내신 성적을 입력해주세요</p>
+                </div>
+                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              {/* 채팅 기억 (로그인한 경우에만 표시) */}
+              {isAuthenticated && (
+                <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                  <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">채팅 기억</p>
+                    <p className="text-xs text-gray-500 mt-0.5">자동 기억 사용중</p>
+                  </div>
+                  <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 하단 섹션 */}
+          <div className="p-6 border-t border-gray-100">
+            {isAuthenticated ? (
+              <div>
+                <p className="text-xs text-gray-500 text-center mb-4 leading-relaxed">
+                  채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
+                </p>
+                <button
+                  onClick={() => {
+                    if (confirm('로그아웃 하시겠습니까?')) {
+                      signOut()
+                    }
+                  }}
+                  className="w-full px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  로그아웃
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs text-gray-500 text-center mb-4 leading-relaxed">
+                  채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
+                </p>
+                <button
+                  onClick={() => navigate('/auth')}
+                  className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors font-medium text-sm"
+                >
+                  회원가입 또는 로그인
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 메인 채팅 영역 */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* 헤더 - 모바일과 데스크톱 분리 */}
+        <header className="bg-white safe-area-top sticky top-0 z-10">
+          {/* 모바일 헤더 */}
+          <div className="sm:hidden px-4 py-3 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+            <button
+                onClick={() => setIsSideNavOpen(true)}
+                className="p-2 -ml-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+              <img src="/로고.png" alt="UniZ Logo" className="h-8" />
+              <span className="text-sm font-semibold text-gray-900">유니로드</span>
             </div>
             
-            {/* 관리자 버튼 - 김도균만 표시 */}
-            {user?.name === '김도균' && (
+            {isAuthenticated ? (
               <button
-                onClick={() => navigate('/admin')}
-                className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                onClick={() => {
+                  if (confirm('로그아웃 하시겠습니까?')) {
+                    signOut()
+                  }
+                }}
+                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 active:text-gray-900 transition-colors"
               >
-                관리자
+                로그아웃
               </button>
+            ) : (
+            <button
+                onClick={() => navigate('/auth')}
+                className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 active:text-blue-700 transition-colors font-medium"
+              >
+                로그인
+            </button>
             )}
+          </div>
+          
+          {/* 데스크톱 헤더 */}
+          <div className="hidden sm:flex px-6 py-4 justify-between items-center">
+            <div className="flex items-center gap-4">
+              <img src="/로고.png" alt="UniZ Logo" className="h-10" />
+              {isAuthenticated && (
+                <div className="text-sm font-medium text-gray-900">
+                  {user?.name || user?.email}
+                </div>
+              )}
+            </div>
             
-            {/* 로그아웃 버튼 */}
+            <div className="flex items-center gap-3">
+              {user?.name === '김도균' && (
+            <button
+              onClick={() => navigate('/admin')}
+                  className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
+            >
+              관리자
+            </button>
+              )}
+            
+              {isAuthenticated ? (
             <button
               onClick={() => {
                 if (confirm('로그아웃 하시겠습니까?')) {
                   signOut()
-                  navigate('/auth')
-                }
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              title="로그아웃"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
+                    }
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
+                >
+                  로그아웃
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate('/auth')}
+                  className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium"
+                >
+                  로그인
             </button>
+              )}
+            </div>
           </div>
         </header>
 
         {/* 채팅 영역 */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
-          <div className="max-w-4xl mx-auto">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 sm:py-8 pb-safe">
+          <div className="max-w-3xl mx-auto">
             {messages.length === 0 && (
-              <div className="text-center mt-20">
-                <h2 className="text-3xl font-bold text-gray-800 mb-8">무엇을 도와드릴까요?</h2>
-                <div className="grid grid-cols-2 gap-4 max-w-2xl mx-auto">
-                  <div 
-                    className="bg-white rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+              <div className="text-center py-12 sm:py-16">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
+                  안녕하세요! 👋
+                </h1>
+                <p className="text-base sm:text-lg text-gray-600 mb-8 sm:mb-12">
+                  무엇을 도와드릴까요?
+                </p>
+                
+                {/* 퀵 액션 카드 - 모바일: 세로, 데스크톱: 그리드 */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4 max-w-2xl mx-auto">
+                  <button
                     onClick={() => setInput('서울대 2028 정시 변경사항 알려줘')}
+                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
                   >
-                    <div className="text-4xl mb-3">📋</div>
-                    <p className="text-gray-700 font-medium">대입 정책 조회</p>
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">📋</div>
+                      <div className="flex-1">
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">대입 정책 조회</p>
+                        <p className="text-xs sm:text-sm text-gray-500">최신 입시 정책을 빠르게 확인하세요</p>
+                      </div>
                   </div>
-                  <div 
-                    className="bg-white rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+                  </button>
+                  
+                  <button
                     onClick={() => setInput('내신 2.5등급인데 서울대 연세대 고려대 비교해줘')}
+                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
                   >
-                    <div className="text-4xl mb-3">🎓</div>
-                    <p className="text-gray-700 font-medium">대학별 입결</p>
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">🎓</div>
+                      <div className="flex-1">
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">대학별 입결 비교</p>
+                        <p className="text-xs sm:text-sm text-gray-500">내 성적으로 갈 수 있는 대학을 비교 분석</p>
+                      </div>
                   </div>
-                  <div 
-                    className="bg-white rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+                  </button>
+                  
+                  <button
                     onClick={() => setInput('백분위 95%면 어느 대학 갈 수 있어?')}
+                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
                   >
-                    <div className="text-4xl mb-3">📊</div>
-                    <p className="text-gray-700 font-medium">합격 가능성 분석</p>
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">📊</div>
+                      <div className="flex-1">
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">합격 가능성 분석</p>
+                        <p className="text-xs sm:text-sm text-gray-500">정확한 데이터 기반으로 합격 가능성 예측</p>
+                      </div>
                   </div>
-                  <div 
-                    className="bg-white rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+                  </button>
+                  
+                  <button
                     onClick={() => setInput('수능까지 3개월 남았는데 공부 계획 세워줘')}
+                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
                   >
-                    <div className="text-4xl mb-3">📚</div>
-                    <p className="text-gray-700 font-medium">공부 계획 세우기</p>
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">📚</div>
+                      <div className="flex-1">
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">맞춤형 공부 계획</p>
+                        <p className="text-xs sm:text-sm text-gray-500">나에게 딱 맞는 효율적인 학습 전략 수립</p>
+                      </div>
                   </div>
+                  </button>
                 </div>
               </div>
             )}
@@ -303,25 +503,39 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* 입력 영역 */}
-        <div className="bg-white border-t border-gray-200 px-4 py-4">
-          <div className="max-w-4xl mx-auto flex gap-2">
+        {/* 입력 영역 - 고정 */}
+        <div className="bg-white pb-safe safe-area-bottom sticky bottom-0">
+          <div className="px-4 sm:px-6 py-3 sm:py-4">
+            <div className="max-w-3xl mx-auto flex items-end gap-2">
+              {/* 입력 필드 */}
+              <div className="flex-1 relative">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyPress}
-              placeholder="메시지를 입력하세요..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSend()
+                    }
+                  }}
+                  placeholder="유니로드에게 무엇이든 물어보세요"
               disabled={isLoading}
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  className="w-full px-4 py-3 text-base bg-gray-50 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] placeholder:text-gray-400"
             />
+              </div>
+              
+              {/* 전송 버튼 */}
             <button
               onClick={handleSend}
               disabled={isLoading || !input.trim()}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium"
+                className="flex-shrink-0 w-11 h-11 sm:w-12 sm:h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
-              전송
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
             </button>
+            </div>
           </div>
         </div>
       </div>

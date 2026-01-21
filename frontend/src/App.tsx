@@ -61,11 +61,7 @@ function App() {
           <Route path="/auth" element={<AuthPage />} />
           <Route
             path="/"
-            element={
-              <ProtectedRoute>
-                <ChatPage />
-              </ProtectedRoute>
-            }
+            element={<ChatPage />}
           />
           <Route
             path="/admin"
