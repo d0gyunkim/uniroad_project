@@ -4,6 +4,7 @@ import { sendMessageStream, ChatResponse } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
+import AuthModal from '../components/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 
@@ -99,8 +100,14 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
-  const [isSideNavOpen, setIsSideNavOpen] = useState(false)
+  const [isSideNavOpen, setIsSideNavOpen] = useState(() => {
+    // 데스크톱에서는 기본적으로 열림, 모바일에서는 닫힘
+    return window.innerWidth >= 640
+  })
+  const [isRecordDropdownOpen, setIsRecordDropdownOpen] = useState(false)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+  const [isOpenChatModalOpen, setIsOpenChatModalOpen] = useState(false)
   const [agentData, setAgentData] = useState<AgentData>({
     orchestrationResult: null,
     subAgentResults: null,
@@ -117,6 +124,20 @@ export default function ChatPage() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
+
+  // 화면 크기 변경 시 사이드바 상태 조정
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 640) {
+        setIsSideNavOpen(true)
+      } else {
+        setIsSideNavOpen(false)
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   // 새 채팅 시작 핸들러
   const handleNewChat = () => {
@@ -379,34 +400,133 @@ export default function ChatPage() {
       <div className={`flex h-screen bg-gray-50 relative transition-all duration-300 ${
         isAgentPanelOpen ? 'w-1/2' : 'w-full'
       }`}>
-        {/* 사이드 네비게이션 오버레이 */}
-        {isSideNavOpen && (
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 sm:hidden"
-            onClick={() => setIsSideNavOpen(false)}
-          />
-        )}
-
         {/* 사이드 네비게이션 */}
         <div
           className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
             isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
-          } sm:translate-x-0 sm:static sm:w-80`}
+          } sm:fixed sm:z-40`}
         >
-        <div className="h-full flex flex-col overflow-y-auto">
-          {/* 검색 바 (로그인한 경우에만 상단에 표시) */}
+        <div className="h-full flex flex-col">
+          {/* 우측 상단 닫기 버튼 */}
+          <div className="absolute top-4 right-4 z-10">
+            <button
+              onClick={() => setIsSideNavOpen(false)}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
+
+          {/* 1. 공지사항 */}
+          <div className="px-4 sm:px-6 pt-16 pb-2">
+            <button className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left">
+              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900">공지사항</p>
+              </div>
+            </button>
+          </div>
+
+          {/* 2. 오픈채팅방 */}
+          <div className="px-4 sm:px-6 pb-2">
+            <button 
+              onClick={() => setIsOpenChatModalOpen(true)}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900 mb-0.5">오픈채팅방</p>
+                <p className="text-[10px] text-gray-600 leading-snug">
+                  사용 후기를 들려주세요.<br />
+                  서울대 개발자의 무료 입시상담!
+                </p>
+              </div>
+            </button>
+          </div>
+
+          {/* 3. 내 입시 기록 관리 (드롭다운) */}
+          <div className="px-4 sm:px-6 pb-2">
+            <button 
+              onClick={() => setIsRecordDropdownOpen(!isRecordDropdownOpen)}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900">내 입시 기록 관리</p>
+              </div>
+              <svg 
+                className={`w-5 h-5 text-gray-600 transition-transform ${isRecordDropdownOpen ? 'rotate-180' : ''}`}
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {/* 드롭다운 메뉴 */}
+            {isRecordDropdownOpen && (
+              <div className="mt-2 ml-4 space-y-1 border-l-2 border-blue-200 pl-4">
+                {/* 내 생활기록부 관리 */}
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
+                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-900">내 생활기록부 관리</p>
+                    <p className="text-[10px] text-gray-500">10초만에 연동하기</p>
+                  </div>
+                </button>
+
+                {/* 3월 6월 9월 모의고사 성적 입력 */}
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
+                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-900">3월 6월 9월 모의고사 성적 입력</p>
+                    <p className="text-[10px] text-gray-500">모의고사 성적을 입력해주세요</p>
+                  </div>
+                </button>
+
+                {/* 내신 성적 입력 */}
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
+                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-900">내신 성적 입력</p>
+                    <p className="text-[10px] text-gray-500">내신 성적을 입력해주세요</p>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 4. 채팅 검색 (로그인한 경우에만 표시) */}
           {isAuthenticated && (
-            <div className="p-4 sm:p-6 pb-3 sm:pb-4">
+            <div className="px-4 sm:px-6 pb-3 border-t border-gray-100 pt-4">
               <div className="relative">
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="채팅 검색"
-                  className="w-full px-2.5 sm:px-3 py-2 sm:py-2.5 pl-8 sm:pl-10 text-xs sm:text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2.5 pl-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <svg
-                  className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400"
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -421,9 +541,9 @@ export default function ChatPage() {
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -437,103 +557,20 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* 사이드 네비 헤더 */}
-          <div className="px-4 sm:px-6 pb-3 sm:pb-4">
-            <div className="flex items-center justify-between mb-1.5 sm:mb-2">
-              <h2 className="text-base sm:text-xl font-bold text-gray-900">내 입시 기록 관리</h2>
-              <button
-                onClick={() => setIsSideNavOpen(false)}
-                className="sm:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <p className="text-xs sm:text-sm text-gray-500">
-              입시 기록을 입력하면 더 정확한 답변을 받을 수 있어요
-            </p>
-          </div>
-
-          {/* 메뉴 항목들 */}
-          <div className="flex-1 px-4 sm:px-6 pb-3 sm:pb-4">
-            <div className="space-y-0">
-              {/* 내 생활기록부 관리 */}
-              <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs sm:text-sm font-medium text-gray-900">내 생활기록부 관리</p>
-                  <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">10초만에 연동하기</p>
-                </div>
-                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
-              {/* 3월 6월 9월 모의고사 성적 입력 */}
-              <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs sm:text-sm font-medium text-gray-900">3월 6월 9월 모의고사 성적 입력</p>
-                  <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">모의고사 성적을 입력해주세요</p>
-                </div>
-                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
-              {/* 내신 성적 입력 */}
-              <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs sm:text-sm font-medium text-gray-900">내신 성적 입력</p>
-                  <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">내신 성적을 입력해주세요</p>
-                </div>
-                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
-              {/* 채팅 기억 (로그인한 경우에만 표시) */}
-              {isAuthenticated && (
-                <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-900">채팅 기억</p>
-                    <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">자동 기억 사용중</p>
-                  </div>
-                  <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 채팅 기록 섹션 (로그인한 경우에만 표시) */}
+          {/* 5. 채팅 내역 (로그인한 경우에만 표시) */}
           {isAuthenticated && (
-            <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-3 sm:pt-4">
-              <div className="flex items-center justify-between mb-3 sm:mb-4">
-                <h2 className="text-base sm:text-xl font-bold text-gray-900">채팅</h2>
+            <div className="flex-1 px-4 sm:px-6 pb-4 overflow-y-auto custom-scrollbar">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold text-gray-900">채팅 내역</h2>
                 <button
                   onClick={handleNewChat}
-                  className="text-[10px] sm:text-xs text-blue-600 hover:text-blue-700 font-medium"
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
                 >
                   새 채팅
                 </button>
               </div>
               
-              <div className="space-y-1 max-h-64 overflow-y-auto">
+              <div className="space-y-1">
                 {(() => {
                   // 검색어로 필터링
                   const filteredSessions = searchQuery
@@ -544,7 +581,7 @@ export default function ChatPage() {
 
                   if (filteredSessions.length === 0) {
                     return (
-                      <p className="text-[10px] sm:text-xs text-gray-500 text-center py-3 sm:py-4">
+                      <p className="text-xs text-gray-500 text-center py-4">
                         {searchQuery ? '검색 결과가 없습니다' : '채팅 기록이 없습니다'}
                       </p>
                     )
@@ -557,14 +594,14 @@ export default function ChatPage() {
                         selectSession(session.id)
                         setIsSideNavOpen(false)
                       }}
-                      className={`w-full text-left px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-colors ${
+                      className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
                         currentSessionId === session.id
                           ? 'bg-blue-50 text-blue-900'
                           : 'hover:bg-gray-50 text-gray-900'
                       }`}
                     >
-                      <p className="text-[10px] sm:text-xs font-medium truncate">{session.title}</p>
-                      <p className="text-[9px] sm:text-[10px] text-gray-500 mt-0.5">
+                      <p className="text-xs font-medium truncate">{session.title}</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">
                         {new Date(session.updated_at).toLocaleDateString('ko-KR', {
                           month: 'short',
                           day: 'numeric',
@@ -601,7 +638,7 @@ export default function ChatPage() {
                   채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
                 </p>
                 <button
-                  onClick={() => navigate('/auth')}
+                  onClick={() => setIsAuthModalOpen(true)}
                   className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors font-medium text-xs sm:text-sm"
                 >
                   회원가입 또는 로그인
@@ -613,7 +650,9 @@ export default function ChatPage() {
       </div>
 
       {/* 메인 채팅 영역 */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${
+        isSideNavOpen ? 'sm:ml-80' : 'sm:ml-0'
+      }`}>
         {/* 헤더 - 모바일과 데스크톱 분리 */}
         <header className="bg-white safe-area-top sticky top-0 z-10">
           {/* 모바일 헤더 */}
@@ -643,7 +682,7 @@ export default function ChatPage() {
               </button>
             ) : (
             <button
-                onClick={() => navigate('/auth')}
+                onClick={() => setIsAuthModalOpen(true)}
                 className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 active:text-blue-700 transition-colors font-medium"
               >
                 로그인
@@ -654,6 +693,18 @@ export default function ChatPage() {
           {/* 데스크톱 헤더 */}
           <div className="hidden sm:flex px-6 py-4 justify-between items-center">
             <div className="flex items-center gap-4">
+              {/* 사이드바 토글 버튼 - 사이드바가 닫혔을 때만 표시 */}
+              {!isSideNavOpen && (
+                <button
+                  onClick={() => setIsSideNavOpen(true)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="사이드바 열기"
+                >
+                  <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                </button>
+              )}
               <img src="/로고.png" alt="UniZ Logo" className="h-10" />
             </div>
             
@@ -695,7 +746,7 @@ export default function ChatPage() {
                 </button>
               ) : (
                 <button
-                  onClick={() => navigate('/auth')}
+                  onClick={() => setIsAuthModalOpen(true)}
                   className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium"
                 >
                   로그인
@@ -835,6 +886,75 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* 로그인 모달 */}
+      <AuthModal 
+        isOpen={isAuthModalOpen} 
+        onClose={() => setIsAuthModalOpen(false)} 
+      />
+
+      {/* 오픈채팅방 모달 */}
+      {isOpenChatModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-slideUp">
+            {/* 헤더 */}
+            <div className="relative px-6 pt-6 pb-4 border-b border-gray-100">
+              <button
+                onClick={() => setIsOpenChatModalOpen(false)}
+                className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <div className="text-center">
+                <img src="/로고.png" alt="UniZ Logo" className="h-12 mx-auto mb-3" />
+                <h2 className="text-xl font-bold text-gray-900">유니로드와 소통하기</h2>
+              </div>
+            </div>
+
+            {/* 본문 */}
+            <div className="px-6 py-6">
+              <div className="mb-6 text-center">
+                <p className="text-base font-semibold text-gray-900 mb-2">
+                  서울대 21학번 선배가 직접 만드는 입시 AI
+                </p>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  입시의 어려움을 누구보다 잘 알기에, 수험생 여러분께 진짜 도움이 되는 AI를 직접 만들고 있습니다.
+                  <br /><br />
+                  편하게 사용해 보시고 솔직한 후기를 들려주세요. 서비스 이용 관련 문의는 물론, 막막한 입시 고민 상담도 언제든 환영합니다.
+                </p>
+              </div>
+
+              {/* 버튼 */}
+              <div className="space-y-3">
+                <a
+                  href="https://open.kakao.com/o/sTxWEbbi"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 active:from-blue-700 active:to-blue-800 transition-all shadow-md hover:shadow-lg font-medium text-center"
+                >
+                  <span className="mr-2">👨‍💻</span>
+                  개발자와 1:1 대화하기
+                </a>
+                <a
+                  href="https://open.kakao.com/o/ggA6GPci"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:from-green-600 hover:to-green-700 active:from-green-700 active:to-green-800 transition-all shadow-md hover:shadow-lg font-medium text-center"
+                >
+                  <span className="mr-2">💬</span>
+                  유니로드 공식 소통방 참여
+                </a>
+              </div>
+
+              <p className="mt-4 text-xs text-center text-gray-500">
+                여러분의 소중한 의견으로 유니로드는 더 똑똑해집니다 ✨
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   )

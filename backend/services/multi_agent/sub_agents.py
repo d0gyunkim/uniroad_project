@@ -18,6 +18,11 @@ from token_logger import log_token_usage
 from services.supabase_client import supabase_service
 from services.gemini_service import gemini_service
 from services.score_converter import ScoreConverter
+from services.khu_score_calculator import calculate_khu_score
+from services.snu_score_calculator import calculate_snu_score
+from services.yonsei_score_calculator import calculate_yonsei_score
+from services.korea_score_calculator import calculate_korea_score
+from services.sogang_score_calculator import calculate_sogang_score
 from services.data_standard import (
     korean_std_score_table,
     math_std_score_table,
@@ -402,6 +407,50 @@ class ConsultingAgent(SubAgentBase):
         normalized_scores = self._normalize_scores(raw_grade_info)
         _log(f"   정규화된 성적: {json.dumps(normalized_scores, ensure_ascii=False, indent=2)}")
 
+        # 경희대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        khu_scores = calculate_khu_score(normalized_scores)
+        normalized_scores["경희대_환산점수"] = khu_scores
+        _log(f"   경희대 환산 점수 계산 완료")
+        for track, score_data in khu_scores.items():
+            if score_data.get("계산_가능"):
+                _log(f"      {track}: {score_data['최종점수']}점 / 600점")
+            else:
+                _log(f"      {track}: 계산 불가 ({score_data.get('오류', 'Unknown')})")
+        
+        # 서울대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        snu_scores = calculate_snu_score(normalized_scores)
+        normalized_scores["서울대_환산점수"] = snu_scores
+        _log(f"   서울대 환산 점수 계산 완료")
+        for track, score_data in snu_scores.items():
+            if score_data.get("계산_가능"):
+                _log(f"      {track}: {score_data['최종점수']}점 (1000점: {score_data.get('최종점수_1000', 'N/A')})")
+            else:
+                _log(f"      {track}: 계산 불가 ({score_data.get('오류', 'Unknown')})")
+        
+        # 연세대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        yonsei_scores = calculate_yonsei_score(normalized_scores)
+        normalized_scores["연세대_환산점수"] = yonsei_scores
+        _log(f"   연세대 환산 점수 계산 완료")
+        for track, score_data in yonsei_scores.items():
+            if score_data.get("계산_가능"):
+                _log(f"      {track}: {score_data['최종점수']}점 / 1000점")
+        
+        # 고려대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        korea_scores = calculate_korea_score(normalized_scores)
+        normalized_scores["고려대_환산점수"] = korea_scores
+        _log(f"   고려대 환산 점수 계산 완료")
+        for track, score_data in korea_scores.items():
+            if score_data.get("계산_가능"):
+                _log(f"      {track}: {score_data['최종점수']}점 / 1000점")
+        
+        # 서강대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        sogang_scores = calculate_sogang_score(normalized_scores)
+        normalized_scores["서강대_환산점수"] = sogang_scores
+        _log(f"   서강대 환산 점수 계산 완료")
+        for track, score_data in sogang_scores.items():
+            if score_data.get("계산_가능"):
+                _log(f"      {track}: {score_data['최종점수']}점 ({score_data.get('적용방식', '')})")
+
         # DB에서 데이터 조회
         susi_data = None
         jeongsi_data = None
@@ -435,11 +484,41 @@ class ConsultingAgent(SubAgentBase):
             # 정규화된 성적 정보 포맷팅
             normalized_scores_text = self._format_normalized_scores(normalized_scores)
             
+            # 경희대 환산 점수 포맷팅
+            khu_scores_text = self._format_khu_scores(khu_scores)
+            
+            # 서울대 환산 점수 포맷팅
+            snu_scores_text = self._format_snu_scores(snu_scores)
+            
+            # 연세대 환산 점수 포맷팅
+            yonsei_scores_text = self._format_yonsei_scores(yonsei_scores)
+            
+            # 고려대 환산 점수 포맷팅
+            korea_scores_text = self._format_korea_scores(korea_scores)
+            
+            # 서강대 환산 점수 포맷팅
+            sogang_scores_text = self._format_sogang_scores(sogang_scores)
+            
             system_prompt = f"""당신은 대학 입시 데이터 분석 전문가입니다.
 사용자의 성적을 '2026 수능 데이터' 기준으로 표준화하여 분석하고, 팩트 기반의 분석 결과만 제공하세요.
 
 ## 학생의 정규화된 성적 (등급-표준점수-백분위)
 {normalized_scores_text}
+
+## 경희대 2026 환산 점수 (600점 만점)
+{khu_scores_text}
+
+## 서울대 2026 환산 점수 (1000점 스케일)
+{snu_scores_text}
+
+## 연세대 2026 환산 점수 (1000점 만점)
+{yonsei_scores_text}
+
+## 고려대 2026 환산 점수 (1000점 환산)
+{korea_scores_text}
+
+## 서강대 2026 환산 점수
+{sogang_scores_text}
 
 ## 가용 입결 데이터
 {json.dumps(all_data, ensure_ascii=False, indent=2)[:6000]}
@@ -463,9 +542,33 @@ class ConsultingAgent(SubAgentBase):
 - 영어: 2등급 (추정)
 [출처: 2026 수능 데이터]
 
+【경희대 2026 환산 점수】
+- 인문: 558.3점
+- 사회: 562.1점
+- 자연: 571.8점 (과탐가산 +8점)
+- 예술체육: 548.2점
+[출처: 경희대 2026 모집요강]
+
+【서울대 2026 환산 점수 (1000점 스케일)】
+- 일반전형: 410.8점 (1000점: 410.8)
+- 순수미술: 276.0점 (1000점: 700점 기준)
+[출처: 서울대 2026 모집요강]
+
+【연세대 2026 환산 점수 (1000점 만점)】
+- 인문: 856.2점, 자연: 872.1점
+[출처: 연세대 2026 모집요강]
+
+【고려대 2026 환산 점수 (1000점 환산)】
+- 인문: 725.3점, 자연: 698.5점
+[출처: 고려대 2026 모집요강]
+
+【서강대 2026 환산 점수】
+- 인문: 486.2점 (B형), 자연: 492.1점 (A형)
+[출처: 서강대 2026 모집요강]
+
 【입결 데이터 비교】
-- 2024학년도 서울대 기계공학부 수시 일반전형 70% 커트라인: 내신 1.5등급 [출처: 컨설팅DB]
-- 2024학년도 연세대 기계공학부 정시 70% 커트라인: 백분위 95.2 [출처: 컨설팅DB]"""
+- 2025학년도 경희대 의예과 정시 70% 커트: 약 580점 (추정) [출처: 컨설팅DB]
+- 2024학년도 서울대 기계공학부 수시 일반전형 70% 커트라인: 내신 1.5등급 [출처: 컨설팅DB]"""
 
         try:
             response = self.model.generate_content(
@@ -686,6 +789,20 @@ class ConsultingAgent(SubAgentBase):
                     value = int(match.group(1))
                     result["subjects"][subject] = {"type": "원점수", "value": value}
                     break
+                
+                # ✅ 새로 추가: "국어 138" 같은 패턴 (점/표준점수 없이 숫자만)
+                # 100 이상이면 표준점수로 간주
+                simple_pattern = rf'{kw}\s+(\d{{2,3}})(?:\s|,|$)'
+                match = re.search(simple_pattern, query)
+                if match and subject not in result["subjects"]:
+                    value = int(match.group(1))
+                    if value >= 100:  # 표준점수로 간주
+                        result["subjects"][subject] = {"type": "표준점수", "value": value}
+                    elif value <= 9:  # 등급으로 간주
+                        result["subjects"][subject] = {"type": "등급", "value": value}
+                    else:  # 10-99: 백분위로 간주
+                        result["subjects"][subject] = {"type": "백분위", "value": value}
+                    break
 
         # 3. "탐구 X등급" 패턴 추가 처리 (탐구1, 탐구2가 아직 추출되지 않은 경우)
         if "탐구1" not in result["subjects"] or "탐구2" not in result["subjects"]:
@@ -708,6 +825,48 @@ class ConsultingAgent(SubAgentBase):
                 result["subjects"]["탐구2"] = {
                     "type": "등급",
                     "value": inquiry_grades[1]
+                }
+        
+        # ✅ 새로 추가: "탐구 60/60", "탐구 70 65" 같은 패턴 처리
+        if "탐구1" not in result["subjects"] or "탐구2" not in result["subjects"]:
+            # 탐구 뒤에 숫자 두 개 (슬래시나 공백으로 구분)
+            inquiry_dual_pattern = r'탐구\s*(\d{1,3})\s*[/,\s]\s*(\d{1,3})'
+            match = re.search(inquiry_dual_pattern, query)
+            if match:
+                val1, val2 = int(match.group(1)), int(match.group(2))
+                
+                # 값의 크기에 따라 표준점수/백분위/등급 구분
+                def infer_type(v):
+                    if v >= 100:
+                        return "표준점수"
+                    elif v >= 50:  # 50-99는 표준점수일 가능성 높음 (탐구)
+                        return "표준점수"
+                    elif v <= 9:
+                        return "등급"
+                    else:  # 10-49는 백분위로 추정
+                        return "백분위"
+                
+                if "탐구1" not in result["subjects"]:
+                    result["subjects"]["탐구1"] = {"type": infer_type(val1), "value": val1}
+                if "탐구2" not in result["subjects"]:
+                    result["subjects"]["탐구2"] = {"type": infer_type(val2), "value": val2}
+        
+        # ✅ 새로 추가: "탐구1 60, 탐구2 60" 패턴
+        if "탐구1" not in result["subjects"]:
+            match = re.search(r'탐구1\s*(\d{1,3})', query)
+            if match:
+                val = int(match.group(1))
+                result["subjects"]["탐구1"] = {
+                    "type": "표준점수" if val >= 50 else ("등급" if val <= 9 else "백분위"),
+                    "value": val
+                }
+        if "탐구2" not in result["subjects"]:
+            match = re.search(r'탐구2\s*(\d{1,3})', query)
+            if match:
+                val = int(match.group(1))
+                result["subjects"]["탐구2"] = {
+                    "type": "표준점수" if val >= 50 else ("등급" if val <= 9 else "백분위"),
+                    "value": val
                 }
 
         # 4. 내신 등급 추출
@@ -817,6 +976,68 @@ class ConsultingAgent(SubAgentBase):
                     # 탐구 과목이 특정되지 않은 경우
                     if score_type == "등급":
                         converted = self._convert_grade_to_scores("탐구_기본", value)
+                    elif score_type == "표준점수":
+                        # 탐구 표준점수 -> 백분위 추정 (사회탐구/과학탐구 평균 기준)
+                        # 탐구 표준점수 범위: 약 20~70, 만점 70 기준
+                        # 표준점수가 높을수록 높은 백분위
+                        if value >= 70:
+                            pct = 99
+                        elif value >= 67:
+                            pct = 97
+                        elif value >= 65:
+                            pct = 95
+                        elif value >= 63:
+                            pct = 92
+                        elif value >= 60:
+                            pct = 88
+                        elif value >= 58:
+                            pct = 84
+                        elif value >= 55:
+                            pct = 78
+                        elif value >= 52:
+                            pct = 70
+                        elif value >= 50:
+                            pct = 62
+                        elif value >= 47:
+                            pct = 52
+                        elif value >= 44:
+                            pct = 40
+                        elif value >= 40:
+                            pct = 28
+                        else:
+                            pct = 15
+                        
+                        converted = {
+                            "grade": 1 if pct >= 96 else (2 if pct >= 89 else (3 if pct >= 77 else 4)),
+                            "standard_score": value,
+                            "percentile": pct
+                        }
+                        _log(f"   {subject} 표준점수 {value} -> 백분위 {pct} (추정)")
+                    elif score_type == "백분위":
+                        # 백분위 -> 표준점수 추정
+                        if value >= 99:
+                            std = 70
+                        elif value >= 95:
+                            std = 65
+                        elif value >= 90:
+                            std = 62
+                        elif value >= 85:
+                            std = 59
+                        elif value >= 80:
+                            std = 57
+                        elif value >= 70:
+                            std = 53
+                        elif value >= 60:
+                            std = 50
+                        else:
+                            std = 45
+                        
+                        converted = {
+                            "grade": 1 if value >= 96 else (2 if value >= 89 else (3 if value >= 77 else 4)),
+                            "standard_score": std,
+                            "percentile": value
+                        }
+                        _log(f"   {subject} 백분위 {value} -> 표준점수 {std} (추정)")
                 
             except Exception as e:
                 _log(f"   ⚠️ {subject} 변환 오류: {e}")
@@ -1013,6 +1234,197 @@ class ConsultingAgent(SubAgentBase):
             return "성적 정보가 입력되지 않았습니다."
         
         return "\n".join(lines)
+    
+    def _format_khu_scores(self, khu_scores: Dict[str, Any]) -> str:
+        """경희대 환산 점수를 텍스트로 포맷팅"""
+        lines = []
+        
+        for track in ["인문", "사회", "자연", "예술체육"]:
+            score_data = khu_scores.get(track, {})
+            
+            if not score_data.get("계산_가능"):
+                lines.append(f"- {track}: 계산 불가 ({score_data.get('오류', '데이터 부족')})")
+                continue
+            
+            final_score = score_data.get("최종점수", 0)
+            base_score = score_data.get("기본점수_600", 0)
+            eng_ded = score_data.get("영어_감점", 0)
+            hist_ded = score_data.get("한국사_감점", 0)
+            bonus = score_data.get("과탐_가산점", 0)
+            
+            score_info = f"{final_score:.1f}점"
+            
+            # 세부 정보 추가
+            details = []
+            if bonus > 0:
+                details.append(f"과탐가산 +{bonus}점")
+            if eng_ded != 0:
+                details.append(f"영어 {eng_ded:+.1f}점")
+            if hist_ded != 0:
+                details.append(f"한국사 {hist_ded:+.1f}점")
+            
+            if details:
+                score_info += f" ({', '.join(details)})"
+            
+            lines.append(f"- {track}: {score_info}")
+        
+        if not lines:
+            return "경희대 환산 점수 계산 불가"
+        
+        result = "\n".join(lines)
+        result += "\n[출처: 경희대 2026 모집요강]"
+        
+        return result
+    
+    def _format_snu_scores(self, snu_scores: Dict[str, Any]) -> str:
+        """서울대 환산 점수를 텍스트로 포맷팅"""
+        lines = []
+        
+        # 주요 모집단위만 표시 (일반/순수미술/디자인/체육)
+        main_tracks = ["일반전형", "순수미술", "디자인", "체육교육"]
+        music_tracks = ["성악", "작곡", "음악학"]
+        
+        # 1. 주요 모집단위
+        for track in main_tracks:
+            score_data = snu_scores.get(track, {})
+            
+            if not score_data.get("계산_가능"):
+                lines.append(f"- {score_data.get('모집단위', track)}: 계산 불가")
+                continue
+            
+            final_score = score_data.get("최종점수", 0)
+            final_1000 = score_data.get("최종점수_1000", final_score)
+            bonus = score_data.get("과탐_가산점", 0)
+            
+            # 감점 정보
+            math_ded = score_data.get("수학_감점", 0)
+            eng_ded = score_data.get("영어_감점", 0)
+            hist_ded = score_data.get("한국사_감점", 0)
+            total_ded = math_ded + eng_ded + hist_ded
+            
+            score_info = f"{final_score:.1f}점 (1000점: {final_1000:.1f})"
+            
+            details = []
+            if bonus > 0:
+                details.append(f"과탐가산 +{bonus}점")
+            if total_ded < -0.1:
+                details.append(f"감점 {total_ded:.1f}점")
+            
+            if details:
+                score_info += f" ({', '.join(details)})"
+            
+            track_name = track if track == "일반전형" else score_data.get('모집단위', track).replace("사범대학 ", "").replace("미술대학 - ", "")
+            lines.append(f"- {track_name}: {score_info}")
+        
+        # 2. 음악대학 (특수 환산)
+        music_line_parts = []
+        for track in music_tracks:
+            score_data = snu_scores.get(track, {})
+            if score_data.get("계산_가능"):
+                final_score = score_data.get("최종점수", 0)
+                final_1000 = score_data.get("최종점수_1000", final_score)
+                track_short = track
+                music_line_parts.append(f"{track_short} {final_1000:.1f}점")
+        
+        if music_line_parts:
+            lines.append(f"- 음악대학: {', '.join(music_line_parts)}")
+        
+        if not lines:
+            return "서울대 환산 점수 계산 불가"
+        
+        result = "\n".join(lines)
+        result += "\n[출처: 서울대 2026 모집요강]"
+        
+        return result
+    
+    def _format_yonsei_scores(self, yonsei_scores: Dict[str, Any]) -> str:
+        """연세대 환산 점수를 텍스트로 포맷팅"""
+        lines = []
+        
+        main_tracks = ["인문", "자연", "의약", "통합"]
+        for track in main_tracks:
+            score_data = yonsei_scores.get(track, {})
+            
+            if not score_data.get("계산_가능"):
+                continue
+            
+            final_score = score_data.get("최종점수", 0)
+            bonus = score_data.get("탐구_가산")
+            
+            score_info = f"{final_score:.1f}점"
+            if bonus:
+                score_info += f" ({bonus})"
+            
+            lines.append(f"- {track}: {score_info}")
+        
+        if not lines:
+            return "연세대 환산 점수 계산 불가"
+        
+        result = "\n".join(lines)
+        result += "\n[출처: 연세대 2026 모집요강]"
+        
+        return result
+    
+    def _format_korea_scores(self, korea_scores: Dict[str, Any]) -> str:
+        """고려대 환산 점수를 텍스트로 포맷팅"""
+        lines = []
+        
+        for track in ["인문", "자연"]:
+            score_data = korea_scores.get(track, {})
+            
+            if not score_data.get("계산_가능"):
+                continue
+            
+            final_score = score_data.get("최종점수", 0)
+            raw_score = score_data.get("원점수", 0)
+            eng_ded = score_data.get("영어_감점", 0)
+            
+            score_info = f"{final_score:.1f}점"
+            if eng_ded < 0:
+                score_info += f" (영어 {eng_ded:.0f}점)"
+            
+            lines.append(f"- {track}: {score_info}")
+        
+        if not lines:
+            return "고려대 환산 점수 계산 불가"
+        
+        result = "\n".join(lines)
+        result += "\n[출처: 고려대 2026 모집요강]"
+        
+        return result
+    
+    def _format_sogang_scores(self, sogang_scores: Dict[str, Any]) -> str:
+        """서강대 환산 점수를 텍스트로 포맷팅"""
+        lines = []
+        
+        for track in ["인문", "자연", "자유전공"]:
+            score_data = sogang_scores.get(track, {})
+            
+            if not score_data.get("계산_가능"):
+                continue
+            
+            final_score = score_data.get("최종점수", 0)
+            method = score_data.get("적용방식", "")
+            
+            method_short = ""
+            if "A형" in method:
+                method_short = "수학가중"
+            elif "B형" in method:
+                method_short = "국어가중"
+            
+            score_info = f"{final_score:.1f}점"
+            if method_short:
+                score_info += f" ({method_short})"
+            
+            lines.append(f"- {track}: {score_info}")
+        
+        if not lines:
+            return "서강대 환산 점수 계산 불가"
+        
+        result = "\n".join(lines)
+        result += "\n[출처: 서강대 2026 모집요강]"
+        
+        return result
 
 
 class TeacherAgent(SubAgentBase):
