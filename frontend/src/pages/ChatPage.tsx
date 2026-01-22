@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { sendMessageStream, ChatResponse } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
+import AgentPanel from '../components/AgentPanel'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 
@@ -99,6 +100,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
   const [isSideNavOpen, setIsSideNavOpen] = useState(false)
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [agentData, setAgentData] = useState<AgentData>({
     orchestrationResult: null,
     subAgentResults: null,
@@ -178,6 +180,9 @@ export default function ChatPage() {
     scrollToBottom()
   }, [messages, currentLog]) // currentLog 변경시에도 스크롤
 
+  const toggleAgentPanel = () => {
+    setIsAgentPanelOpen(!isAgentPanelOpen)
+  }
 
   const handleSend = async () => {
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
@@ -359,21 +364,35 @@ export default function ChatPage() {
 
 
   return (
-    <div className="flex h-screen bg-gray-50 relative">
-      {/* 사이드 네비게이션 오버레이 */}
-      {isSideNavOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 sm:hidden"
-          onClick={() => setIsSideNavOpen(false)}
-        />
-      )}
+    <div className="flex h-screen">
+      {/* Agent 디버그 패널 (좌측) */}
+      <AgentPanel
+        orchestrationResult={agentData.orchestrationResult}
+        subAgentResults={agentData.subAgentResults}
+        finalAnswer={agentData.finalAnswer}
+        rawAnswer={agentData.rawAnswer}
+        logs={agentData.logs}
+        isOpen={isAgentPanelOpen}
+        onClose={() => setIsAgentPanelOpen(false)}
+      />
 
-      {/* 사이드 네비게이션 */}
-      <div
-        className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
-          isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
-        } sm:translate-x-0 sm:static sm:w-80`}
-      >
+      <div className={`flex h-screen bg-gray-50 relative transition-all duration-300 ${
+        isAgentPanelOpen ? 'w-1/2' : 'w-full'
+      }`}>
+        {/* 사이드 네비게이션 오버레이 */}
+        {isSideNavOpen && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-40 sm:hidden"
+            onClick={() => setIsSideNavOpen(false)}
+          />
+        )}
+
+        {/* 사이드 네비게이션 */}
+        <div
+          className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
+            isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
+          } sm:translate-x-0 sm:static sm:w-80`}
+        >
         <div className="h-full flex flex-col overflow-y-auto">
           {/* 검색 바 (로그인한 경우에만 상단에 표시) */}
           {isAuthenticated && (
@@ -640,12 +659,27 @@ export default function ChatPage() {
             
             <div className="flex items-center gap-3">
               {user?.name === '김도균' && (
-            <button
-              onClick={() => navigate('/admin')}
-                  className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
-            >
-              관리자
-            </button>
+                <>
+                  <button
+                    onClick={toggleAgentPanel}
+                    className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium ${
+                      isAgentPanelOpen
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        : 'bg-slate-700 text-white hover:bg-slate-600'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                    </svg>
+                    Agent
+                  </button>
+                  <button
+                    onClick={() => navigate('/admin')}
+                    className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
+                  >
+                    관리자
+                  </button>
+                </>
               )}
             
               {isAuthenticated ? (
@@ -800,6 +834,7 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   )

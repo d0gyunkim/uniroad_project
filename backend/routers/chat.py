@@ -118,14 +118,68 @@ async def chat(request: ChatRequest):
 
         execution_plan = orchestration_result.get("execution_plan", [])
         answer_structure = orchestration_result.get("answer_structure", [])
+        direct_response = orchestration_result.get("direct_response", None)
         
         log_and_emit("")
         log_and_emit(f"📋 Orchestration 결과:")
         log_and_emit(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
         log_and_emit(f"   실행 계획: {len(execution_plan)}개 step")
         log_and_emit(f"   답변 구조: {len(answer_structure)}개 섹션")
+        
+        # 즉시 응답 체크
+        if direct_response:
+            log_and_emit(f"   ⚡ 즉시 응답 모드")
+        
         log_and_emit(f"   ⏱️ 처리 시간: {orch_time:.2f}초")
         log_and_emit("="*80)
+
+        # ========================================
+        # 즉시 응답 처리
+        # ========================================
+        if direct_response:
+            log_and_emit("")
+            log_and_emit("="*80)
+            log_and_emit("⚡ 즉시 응답 - Sub Agents 및 Final Agent 생략")
+            log_and_emit("="*80)
+            log_and_emit(f"   응답 길이: {len(direct_response)}자")
+            
+            # 대화 이력에 추가
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": direct_response})
+
+            # 최근 10턴만 유지
+            if len(history) > 20:
+                conversation_sessions[session_id] = history[-20:]
+
+            # 채팅 로그 저장
+            await supabase_service.insert_chat_log(
+                message,
+                direct_response,
+                is_fact_mode=False
+            )
+
+            # 전체 파이프라인 시간 계산
+            pipeline_time = time.time() - pipeline_start
+            
+            log_and_emit("")
+            log_and_emit(f"{'#'*80}")
+            log_and_emit(f"# ✅ 즉시 응답 완료")
+            log_and_emit(f"# 응답 길이: {len(direct_response)}자")
+            log_and_emit(f"# ⏱️ 처리 시간: {pipeline_time:.2f}초")
+            log_and_emit(f"{'#'*80}")
+            
+            print(f"🟢 [REQUEST_END] {request_id}\n")
+
+            return ChatResponse(
+                response=direct_response,
+                raw_answer=direct_response,
+                sources=[],
+                source_urls=[],
+                used_chunks=[],
+                orchestration_result=orchestration_result,
+                sub_agent_results=None,
+                metadata={"immediate_response": True, "pipeline_time": pipeline_time}
+            )
 
         # ========================================
         # 2단계: Sub Agents 실행
@@ -342,14 +396,72 @@ async def chat_stream(request: ChatRequest):
 
             execution_plan = orchestration_result.get("execution_plan", [])
             answer_structure = orchestration_result.get("answer_structure", [])
+            direct_response = orchestration_result.get("direct_response", None)
             
             yield send_log("")
             yield send_log(f"📋 Orchestration 결과:")
             yield send_log(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
             yield send_log(f"   실행 계획: {len(execution_plan)}개 step")
             yield send_log(f"   답변 구조: {len(answer_structure)}개 섹션")
+            
+            # 즉시 응답 체크
+            if direct_response:
+                yield send_log(f"   ⚡ 즉시 응답 모드")
+            
             yield send_log(f"   ⏱️ 처리 시간: {orch_time:.2f}초")
             yield send_log("="*80)
+
+            # ========================================
+            # 즉시 응답 처리
+            # ========================================
+            if direct_response:
+                yield send_log("")
+                yield send_log("="*80)
+                yield send_log("⚡ 즉시 응답 - Sub Agents 및 Final Agent 생략")
+                yield send_log("="*80)
+                yield send_log(f"   응답 길이: {len(direct_response)}자")
+                
+                # 대화 이력에 추가
+                history.append({"role": "user", "content": message})
+                history.append({"role": "assistant", "content": direct_response})
+
+                # 최근 10턴만 유지
+                if len(history) > 20:
+                    conversation_sessions[session_id] = history[-20:]
+
+                # 채팅 로그 저장
+                await supabase_service.insert_chat_log(
+                    message,
+                    direct_response,
+                    is_fact_mode=False
+                )
+
+                # 전체 파이프라인 시간 계산
+                pipeline_time = time.time() - pipeline_start
+                
+                yield send_log("")
+                yield send_log(f"{'#'*80}")
+                yield send_log(f"# ✅ 즉시 응답 완료")
+                yield send_log(f"# 응답 길이: {len(direct_response)}자")
+                yield send_log(f"# ⏱️ 처리 시간: {pipeline_time:.2f}초")
+                yield send_log(f"{'#'*80}")
+                
+                print(f"🟢 [STREAM_REQUEST_END] {request_id}\n")
+
+                # 최종 응답 전송
+                result = ChatResponse(
+                    response=direct_response,
+                    raw_answer=direct_response,
+                    sources=[],
+                    source_urls=[],
+                    used_chunks=[],
+                    orchestration_result=orchestration_result,
+                    sub_agent_results=None,
+                    metadata={"immediate_response": True, "pipeline_time": pipeline_time},
+                    logs=logs
+                )
+                yield f"data: {json.dumps({'type': 'result', 'data': result.dict()})}\n\n"
+                return
 
             # ========================================
             # 2단계: Sub Agents 실행
