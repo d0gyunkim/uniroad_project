@@ -123,8 +123,45 @@ async def chat(request: ChatRequest):
         log_and_emit("="*80)
         log_and_emit("🎯 [1단계] Orchestration Agent 실행")
         log_and_emit("="*80)
-        log_and_emit(f"📝 분석할 질문: \"{message}\"")
-        log_and_emit(f"💭 이전 대화: {len(history)}개 메시지")
+        
+        # 사용자에게 진행 상황을 더 자세히 표시 (실제 값 포함)
+        log_and_emit(f"📝 받은 질문: \"{message}\"")
+        log_and_emit("🔍 질문 분석을 시작합니다...")
+        
+        # 질문에서 키워드 추출하여 표시
+        keywords = []
+        universities = ['서울대', '연세대', '고려대', '성균관대', '경희대', '서강대', 'SKY', '스카이']
+        years = ['2024', '2025', '2026', '2027']
+        admission_types = ['정시', '수시', '입결', '모집요강', '전형', '커트라인']
+        
+        for univ in universities:
+            if univ in message:
+                keywords.append(univ)
+        for year in years:
+            if year in message:
+                keywords.append(f"{year}학년도")
+        for atype in admission_types:
+            if atype in message:
+                keywords.append(atype)
+        
+        if keywords:
+            log_and_emit(f"   → 키워드 발견: {', '.join(keywords)}")
+        
+        # 성적 정보 감지
+        import re
+        grade_patterns = [
+            r'(\d)[등급]',
+            r'국어\s*(\d)',
+            r'수학\s*(\d)',
+            r'영어\s*(\d)',
+            r'탐구\s*(\d)',
+            r'(\d{2,3})점',
+        ]
+        has_grades = any(re.search(p, message) for p in grade_patterns)
+        if has_grades:
+            log_and_emit("   → 성적 정보 감지됨 - 합격 분석 가능")
+        
+        log_and_emit("   → AI가 최적의 답변 전략을 수립 중...")
         
         # 실시간 로그 콜백 설정 (현재 요청에만 적용)
         from services.multi_agent import orchestration_agent, sub_agents, final_agent
@@ -166,9 +203,28 @@ async def chat(request: ChatRequest):
         if user_intent and user_intent != 'N/A':
             log_and_emit(f"💡 사용자 의도 파악: {user_intent}")
         
-        # extracted_scores 로그
+        # extracted_scores 로그 - 상세 정보 포함
         if extracted_scores:
             log_and_emit(f"   📊 추출된 성적: {len(extracted_scores)}개 과목")
+            # 성적 상세 정보를 사용자 친화적으로 표시
+            score_details = []
+            for subject, info in extracted_scores.items():
+                if isinstance(info, dict):
+                    grade = info.get('등급') or info.get('grade')
+                    score = info.get('점수') or info.get('score') or info.get('표준점수')
+                    percentile = info.get('백분위') or info.get('percentile')
+                    if grade:
+                        score_details.append(f"{subject} {grade}등급")
+                    elif score:
+                        score_details.append(f"{subject} {score}점")
+                    elif percentile:
+                        score_details.append(f"{subject} 백분위 {percentile}")
+                elif isinstance(info, (int, float, str)):
+                    score_details.append(f"{subject}: {info}")
+            if score_details:
+                log_and_emit(f"   → 성적 분석: {', '.join(score_details[:5])}")
+                if len(score_details) > 5:
+                    log_and_emit(f"   → 외 {len(score_details) - 5}개 과목")
         else:
             log_and_emit(f"   ℹ️  성적 추출 없음")
         

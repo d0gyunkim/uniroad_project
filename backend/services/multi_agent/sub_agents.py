@@ -2104,13 +2104,26 @@ async def execute_sub_agents(
     import asyncio
     import time
     
-    # extracted_scores 전달 상태 로그
+    # extracted_scores 전달 상태 로그 - 사용자 친화적 형식
     if extracted_scores:
-        _log(f"   📊 Orchestration에서 전달받은 성적: {len(extracted_scores)}개 과목")
-        for subj, info in extracted_scores.items():
-            _log(f"      - {subj}: {info.get('type')} {info.get('value')}")
+        _log(f"   📊 성적 정보 분석 완료: {len(extracted_scores)}개 과목")
+        # 간결하게 성적 요약 표시
+        grade_summary = []
+        for subj, info in list(extracted_scores.items())[:6]:  # 최대 6개
+            score_type = info.get('type', '')
+            value = info.get('value', '')
+            if score_type == '등급' or '등급' in str(score_type):
+                grade_summary.append(f"{subj} {value}등급")
+            elif score_type == '표준점수' or '표준' in str(score_type):
+                grade_summary.append(f"{subj} {value}점")
+            elif score_type == '백분위':
+                grade_summary.append(f"{subj} 백분위 {value}")
+            else:
+                grade_summary.append(f"{subj}: {value}")
+        if grade_summary:
+            _log(f"   → 인식된 성적: {', '.join(grade_summary)}")
     else:
-        _log("   ℹ️  Orchestration에서 전달받은 성적 없음")
+        _log("   ℹ️  별도 성적 정보 없음 - 질문에서 직접 분석")
     
     # 1단계: 모든 step의 쿼리 전처리 (병렬 처리 전에 완료)
     processed_steps = []
