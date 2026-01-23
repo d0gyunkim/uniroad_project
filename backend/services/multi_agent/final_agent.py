@@ -60,33 +60,56 @@ class FinalAgent:
         # 로그 추가
         _log("   [후처리] 원본 텍스트 길이: " + str(len(text)))
         _log("   [후처리] SECTION_START 개수: " + str(text.count("===SECTION_START===")))
+        _log("   [후처리] SECTION_END 개수: " + str(text.count("===SECTION_END===")))
+        
+        # 디버깅: 원본 텍스트에 cite 태그가 몇 개나 있는지 확인
+        all_cite_pattern = r'<cite[^>]*>'
+        original_cite_count = len(re.findall(all_cite_pattern, text))
+        _log(f"   [후처리] 원본에 있는 cite 태그 수: {original_cite_count}개")
         
         # 섹션 패턴 찾기
         section_pattern = r'===SECTION_START===(.*?)===SECTION_END==='
         
         sections = []
-        for match in re.finditer(section_pattern, text, flags=re.DOTALL):
+        for idx, match in enumerate(re.finditer(section_pattern, text, flags=re.DOTALL), 1):
             section_content = match.group(1).strip()
             
             # 빈 섹션 스킵
             if not section_content:
-                _log(f"   [후처리] 빈 섹션 발견, 스킵")
+                _log(f"   [후처리] 섹션 #{idx}: 빈 섹션 발견, 스킵")
                 continue
             
             # cite 태그 찾기 (data-url은 선택적)
             cite_pattern = r'<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>.*?</cite>'
             
             citations = []
-            seen = set()
+            seen_documents = set()  # ✅ 같은 PDF 문서명 추적
             
-            for cite_match in re.finditer(cite_pattern, section_content, flags=re.DOTALL):
+            # 이 섹션에서 발견된 모든 cite 태그 수집
+            cite_matches = list(re.finditer(cite_pattern, section_content, flags=re.DOTALL))
+            _log(f"   [후처리] 섹션 #{idx}: cite 태그 {len(cite_matches)}개 발견")
+            
+            for cite_match in cite_matches:
                 source = cite_match.group(1)
                 url = cite_match.group(2) or ""  # data-url이 없으면 빈 문자열
-                key = (source, url)
                 
-                if key not in seen and source:  # 중복 제거 및 빈 source 제외
-                    seen.add(key)
-                    citations.append((source, url))
+                if not source:  # 빈 source 제외
+                    continue
+                
+                # ✅ PDF 문서명 추출 (url 또는 source에서)
+                doc_name = self._extract_document_name(url, source)
+                
+                # ✅ 같은 문서명이면 스킵 (섹션 내 중복 제거)
+                if doc_name in seen_documents:
+                    _log(f"   [후처리] 섹션 #{idx}: 중복 스킵 (문서: {doc_name}) → {source[:50]}...")
+                    continue
+                
+                # ✅ 첫 번째 것만 추가
+                seen_documents.add(doc_name)
+                citations.append((source, url))
+                _log(f"   [후처리] 섹션 #{idx}: 추가 (문서: {doc_name}) → {source[:50]}...")
+            
+            _log(f"   [후처리] 섹션 #{idx}: 중복 제거 후 {len(citations)}개 citation (같은 문서당 1개)")
             
             # 본문에서 cite 태그 모두 제거
             section_content_clean = re.sub(cite_pattern, '', section_content, flags=re.DOTALL)
@@ -105,17 +128,21 @@ class FinalAgent:
             # 최종 확인: 빈 섹션이 아닌 경우에만 추가
             if final_section.strip():
                 sections.append(final_section)
-                _log(f"   [후처리] 섹션 #{len(sections)} 추가 (길이: {len(final_section)}자)")
+                _log(f"   [후처리] 섹션 #{idx} 완료 (본문: {len(section_content_clean)}자, cite: {len(citations)}개)")
         
         # 섹션이 없으면 원본 반환
         if not sections:
             _log("   [후처리] ⚠️ 섹션을 찾지 못함, 원본 반환")
+            _log("   [후처리] 💡 LLM이 SECTION_START/END 마커를 안 넣었을 가능성 높음")
             return text.strip()
         
         # 섹션 간 세 줄 간격으로 연결 (출처 포함 섹션 아래 빈 줄 하나 추가)
         result = '\n\n\n'.join(sections)
         
+        # 최종 결과에 있는 cite 태그 개수 확인
+        final_cite_count = len(re.findall(all_cite_pattern, result))
         _log("   [후처리] 처리된 섹션 수: " + str(len(sections)))
+        _log(f"   [후처리] 최종 cite 태그 수: {final_cite_count}개 (원본 {original_cite_count}개)")
         _log("   [후처리] 최종 텍스트 길이: " + str(len(result)) + "자")
         
         return result.strip()
@@ -247,6 +274,17 @@ class FinalAgent:
             raw_answer = response.text
             final_answer = self._post_process_sections(raw_answer)
 
+            # ⚠️ 환산점수가 포함된 응답이면 무조건 "수능 점수 변환 및 추정 방법" cite 태그 추가
+            SCORE_GUIDE_URL = os.getenv(
+                "SCORE_CONVERSION_GUIDE_URL",
+                "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/efe55407-d51c-4cab-8c20-aabb2445ac2b.pdf"
+            )
+            if "환산" in final_answer and "수능 점수 변환 및 추정 방법" not in final_answer:
+                final_answer += f'\n\n<cite data-source="수능 점수 변환 및 추정 방법" data-url="{SCORE_GUIDE_URL}"></cite>'
+                all_sources.append("수능 점수 변환 및 추정 방법")
+                all_source_urls.append(SCORE_GUIDE_URL)
+                _log(f"   ✅ 환산점수 감지 → 점수 변환 방법 cite 태그 강제 추가")
+
             # 답변에서 실제 인용된 출처만 추출 (cite 태그 기반)
             used_chunks = []
             if all_chunks:
@@ -288,14 +326,14 @@ class FinalAgent:
     def _extract_cited_chunks_only(self, answer: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         답변에서 <cite> 태그로 실제 인용된 출처만 추출합니다.
-        같은 PDF 문서는 하나의 청크만 선택합니다 (중복 제거).
+        ✅ 같은 PDF 문서는 1개만 반환 (중복 제거)
         
         Args:
             answer: 생성된 답변 (cite 태그 포함)
-            chunks: 검색된 모든 청크 목록
+            chunks: 청크 목록 (citation 객체 리스트)
             
         Returns:
-            실제 인용된 청크 목록 (같은 문서당 하나씩만)
+            실제 인용된 청크 목록 (같은 PDF당 1개씩만)
         """
         if not chunks or not answer:
             return []
@@ -317,37 +355,49 @@ class FinalAgent:
         for idx, source in enumerate(cited_sources, 1):
             _log(f"      {idx}. {source[:80]}...")
         
-        # 인용된 출처에 해당하는 청크만 찾기 (같은 PDF 문서당 하나만)
+        # 인용된 출처에 해당하는 청크만 찾기 (같은 PDF 문서당 1개만!)
         cited_chunks = []
-        seen_documents = set()  # 같은 PDF 문서는 한 번만 (파일명 기준)
+        seen_documents = set()  # ✅ 중복 제거용
         
-        for chunk in chunks:
+        for item in chunks:
+            # ✅ citation 구조 처리: { "chunk": {...}, "source": "...", "url": "..." }
+            if isinstance(item, dict) and "chunk" in item:
+                chunk = item["chunk"]
+                citation_source = item.get("source", "")
+                citation_url = item.get("url", "")
+            else:
+                chunk = item
+                citation_source = ""
+                citation_url = ""
+            
             chunk_title = chunk.get('title', '')
             chunk_source = chunk.get('source', '')
             chunk_file_url = chunk.get('file_url', '')
             
-            # PDF 문서명 추출 (file_url에서 추출)
-            document_name = self._extract_document_name(chunk_file_url, chunk_title)
+            # ✅ 문서명 추출 (중복 체크용)
+            doc_name = self._extract_document_name(chunk_file_url, chunk_title)
             
-            # 이미 이 문서에서 청크를 추가했으면 스킵
-            if document_name in seen_documents:
+            # ✅ 이미 같은 문서가 있으면 스킵
+            if doc_name in seen_documents:
+                _log(f"      ⏭️ 중복 스킵: {doc_name}")
                 continue
             
             # 청크의 출처가 cited_sources에 있는지 확인
             for cited_source in cited_sources:
-                # 출처 이름이 일치하거나 포함되는 경우
                 if (cited_source in chunk_title or 
                     chunk_title in cited_source or
                     cited_source in chunk_source or
-                    chunk_source in cited_source):
+                    chunk_source in cited_source or
+                    cited_source in citation_source or
+                    citation_source in cited_source):
                     
-                    # 같은 문서에서 처음 발견된 청크만 추가
                     cited_chunks.append(chunk)
-                    seen_documents.add(document_name)
-                    _log(f"      ✅ 선택: {document_name}")
+                    seen_documents.add(doc_name)
+                    _log(f"      ✅ 선택: {doc_name}")
                     break
         
-        _log(f"   ✅ 실제 인용된 청크: {len(cited_chunks)}개 (같은 문서당 1개씩)")
+        _log(f"   ✅ 실제 인용된 청크: {len(cited_chunks)}개 (같은 PDF당 1개)")
+        _log(f"   ⏭️ 스킵된 중복: {len(chunks) - len(cited_chunks)}개")
         return cited_chunks
     
     def _extract_document_name(self, file_url: str, title: str) -> str:
@@ -550,6 +600,7 @@ class FinalAgent:
     def _format_sub_agent_results(self, results: Dict[str, Any]) -> tuple:
         """
         Sub Agent 결과를 텍스트로 포맷하고 출처 정보 수집
+        ⚠️ 중복 제거는 _post_process_sections에서 섹션별로 처리
 
         Returns:
             (formatted_text, sources, source_urls, citations, all_chunks)
@@ -558,7 +609,7 @@ class FinalAgent:
         all_sources = []
         all_source_urls = []
         all_citations = []
-        all_chunks = []  # 모든 청크 정보 수집
+        all_chunks = []  # 모든 청크 정보 (중복 제거 안 함)
 
         for step_key, result in results.items():
             agent_name = result.get("agent", "Unknown")
@@ -573,10 +624,10 @@ class FinalAgent:
             all_source_urls.extend(source_urls)
             all_citations.extend(citations)
             
-            # 청크 정보 수집 (citations에서 chunk 정보 추출)
+            # 청크 정보 수집 (모두 수집, 섹션별 중복 제거는 나중에)
             for citation in citations:
                 if isinstance(citation, dict) and "chunk" in citation:
-                    all_chunks.append(citation["chunk"])
+                    all_chunks.append(citation)  # citation 전체 저장 { chunk, source, url }
 
             # 출처 정보를 결과에 포함
             source_info = ""
@@ -593,6 +644,11 @@ class FinalAgent:
 {source_info}
 """)
 
+        # 청크 수집 요약
+        total_citations = len(all_citations)
+        collected_chunks = len(all_chunks)
+        _log(f"   📊 청크 수집 요약: {total_citations}개 citation → {collected_chunks}개 청크 (모두 수집, 섹션별 중복 제거는 나중에)")
+        
         return "\n---\n".join(formatted), all_sources, all_source_urls, all_citations, all_chunks
 
     def _format_answer_structure(self, structure: List[Dict]) -> str:

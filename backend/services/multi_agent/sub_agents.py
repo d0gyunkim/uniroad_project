@@ -491,13 +491,17 @@ class ConsultingAgent(SubAgentBase):
             "과학탐구": science_inquiry_data
         }
 
-    async def execute(self, query: str) -> Dict[str, Any]:
+    async def execute(self, query: str, extracted_scores: Dict[str, Any] = None) -> Dict[str, Any]:
         """성적 기반 합격 가능 대학 분석"""
         _log("")
         _log("="*60)
         _log(f"📊 컨설팅 Agent 실행")
         _log("="*60)
         _log(f"쿼리: {query[:200]}..." if len(query) > 200 else f"쿼리: {query}")
+        
+        # extracted_scores 전달 확인 로그
+        if extracted_scores:
+            _log(f"   📊 extracted_scores 전달됨: {len(extracted_scores)}개 과목")
 
         # 전처리된 성적이 있는지 확인
         preprocessed = False
@@ -733,23 +737,46 @@ class ConsultingAgent(SubAgentBase):
             if admission_results and admission_results.get("citations"):
                 citations.extend(admission_results["citations"])
             
-            # 점수 변환이 실제로 이루어진 경우에만 산출방식 문서 추가
+            # 환산점수가 가동된 경우 (normalized_scores가 있으면) 무조건 점수 산출 방법 문서 추가
+            # ⚠️ 중요: LLM에 의존하지 않고 직접 cite 태그를 result_text에 추가!
+            import os
+            conversion_guide_url = os.getenv(
+                "SCORE_CONVERSION_GUIDE_URL",
+                "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/efe55407-d51c-4cab-8c20-aabb2445ac2b.pdf"
+            )
+            
             if normalized_scores and normalized_scores.get("과목별_성적"):
+                # 1. result_text에 직접 cite 태그 추가 (LLM 의존 X)
+                result_text += f'\n\n<cite data-source="수능 점수 변환 및 추정 방법" data-url="{conversion_guide_url}"></cite>'
+                
+                # 2. citations 배열에도 추가 (참조용)
                 citations.append({
-                    "text": "표준점수·백분위 산출 방식",
-                    "source": "유니로드 2026 수능 표준점수 및 백분위 산출 방식 문서",
-                    "url": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf"
+                    "text": "수능 점수 변환 및 추정 방법",
+                    "source": "2026학년도 수능 점수 변환 및 추정 방법 안내 (유니로드)",
+                    "url": conversion_guide_url
                 })
+                _log(f"   ✅ 점수 산출 방법 문서 cite 태그 + citation 강제 추가 (normalized_scores 존재)")
 
             _log(f"   분석 완료")
             _log("="*60)
 
             # sources 목록 구성 - Supabase 전형결과 데이터 포함
             sources = []
+            source_urls = []
+            
             if admission_results and admission_results.get("sources"):
                 sources.extend(admission_results["sources"])
+            
+            # admission_results의 citations에서 URL 추출
+            if admission_results and admission_results.get("citations"):
+                for cit in admission_results["citations"]:
+                    if isinstance(cit, dict) and cit.get("url"):
+                        source_urls.append(cit["url"])
+            
+            # 환산점수가 가동된 경우 점수 변환 문서 추가
             if normalized_scores and normalized_scores.get("과목별_성적"):
-                sources.append("표준점수·백분위 산출 방식")
+                sources.append("수능 점수 변환 및 추정 방법")
+                source_urls.append(conversion_guide_url)
             
             return {
                 "agent": self.name,
@@ -759,7 +786,7 @@ class ConsultingAgent(SubAgentBase):
                 "grade_info": raw_grade_info,
                 "normalized_scores": normalized_scores,  # 정규화된 성적 추가
                 "sources": sources,
-                "source_urls": [],
+                "source_urls": source_urls,
                 "citations": citations
             }
 
@@ -2203,7 +2230,13 @@ async def execute_sub_agents(
 
         try:
             agent = get_agent(agent_name)
-            result = await agent.execute(query)
+            
+            # 컨설팅 agent에는 extracted_scores 전달
+            if "컨설팅" in agent_name and extracted_scores:
+                result = await agent.execute(query, extracted_scores=extracted_scores)
+            else:
+                result = await agent.execute(query)
+            
             results[f"Step{step_num}_Result"] = result
             
             status_icon = "✅" if result.get('status') == 'success' else "❌"
