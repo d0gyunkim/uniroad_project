@@ -807,6 +807,34 @@
                 html += '</div>';
             }
 
+            // Extracted Scores (성적 추출 결과)
+            if (data.extracted_scores) {
+                html += '<div class="json-output" style="background: #e8f5e9; border: 2px solid #4caf50;">';
+                html += '<h3 style="color: #2e7d32; margin-bottom: 8px;">📊 Extracted Scores (LLM 추출)</h3>';
+                html += `<pre>${escapeHtml(JSON.stringify(data.extracted_scores, null, 2))}</pre>`;
+                html += '</div>';
+            }
+
+            // Preprocessed Queries (전처리된 쿼리)
+            if (data.preprocessed_queries && data.preprocessed_queries.length > 0) {
+                html += '<div class="json-output" style="background: #fff3e0; border: 2px solid #ff9800;">';
+                html += '<h3 style="color: #e65100; margin-bottom: 8px;">🔧 Preprocessed Queries (Python 전처리)</h3>';
+                
+                data.preprocessed_queries.forEach(q => {
+                    html += `<div style="margin-bottom: 16px; padding: 12px; background: white; border-radius: 6px;">`;
+                    html += `<div style="font-weight: bold; color: #333;">Step ${q.step}: ${escapeHtml(q.agent)}</div>`;
+                    
+                    if (q.preprocessed_query) {
+                        html += `<div style="margin-top: 8px; padding: 8px; background: #e3f2fd; border-radius: 4px; white-space: pre-wrap; font-size: 12px;">${escapeHtml(q.preprocessed_query)}</div>`;
+                    } else {
+                        html += `<div style="margin-top: 8px; color: #666; font-style: italic;">전처리 없음 (컨설팅 agent 아님)</div>`;
+                    }
+                    html += `</div>`;
+                });
+                
+                html += '</div>';
+            }
+
             container.innerHTML = html;
         }
 

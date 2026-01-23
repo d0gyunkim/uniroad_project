@@ -397,15 +397,44 @@ class ConsultingAgent(SubAgentBase):
         _log("="*60)
         _log(f"📊 컨설팅 Agent 실행")
         _log("="*60)
-        _log(f"쿼리: {query}")
+        _log(f"쿼리: {query[:200]}..." if len(query) > 200 else f"쿼리: {query}")
 
-        # 쿼리에서 성적 정보 추출 및 정규화
-        raw_grade_info = self._extract_grade_from_query(query)
-        _log(f"   추출된 원본 성적: {raw_grade_info}")
+        # 전처리된 성적이 있는지 확인
+        preprocessed = False
+        normalized_scores = None
+        raw_grade_info = {}
+        actual_query = query
         
-        # 점수 정규화 (등급-표준점수-백분위)
-        normalized_scores = self._normalize_scores(raw_grade_info)
-        _log(f"   정규화된 성적: {json.dumps(normalized_scores, ensure_ascii=False, indent=2)}")
+        if "[전처리된 성적]" in query and "[원본 쿼리]" in query:
+            try:
+                _log("   ✅ 전처리된 성적 감지 - 파싱 시작")
+                
+                # 전처리된 성적 섹션과 원본 쿼리 분리
+                parts = query.split("[원본 쿼리]")
+                preprocessed_section = parts[0].replace("[전처리된 성적]", "").strip()
+                actual_query = parts[1].strip() if len(parts) > 1 else query
+                
+                # 전처리된 성적 파싱
+                normalized_scores = self._parse_preprocessed_scores(preprocessed_section)
+                
+                if normalized_scores and normalized_scores.get("과목별_성적"):
+                    preprocessed = True
+                    _log(f"   📋 파싱된 과목 수: {len(normalized_scores['과목별_성적'])}개")
+                else:
+                    _log("   ⚠️  전처리된 성적 파싱 실패 - fallback")
+                    
+            except Exception as e:
+                _log(f"   ⚠️  전처리된 성적 파싱 오류: {e} - fallback")
+        
+        # Fallback: 기존 방식으로 성적 추출
+        if not preprocessed:
+            _log("   📝 기존 방식으로 성적 추출")
+            raw_grade_info = self._extract_grade_from_query(query)
+            _log(f"   추출된 원본 성적: {raw_grade_info}")
+            
+            # 점수 정규화 (등급-표준점수-백분위)
+            normalized_scores = self._normalize_scores(raw_grade_info)
+            _log(f"   정규화된 성적: {json.dumps(normalized_scores, ensure_ascii=False, indent=2)}")
 
         # 경희대 환산 점수 계산 (로컬 연산, API 호출 없음)
         khu_scores = calculate_khu_score(normalized_scores)
@@ -573,7 +602,7 @@ class ConsultingAgent(SubAgentBase):
         try:
             response = self.model.generate_content(
                 f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
-                generation_config={"temperature": 0.1, "max_output_tokens": 1024},
+                generation_config={"temperature": 0.1, "max_output_tokens": 2048},
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
@@ -1425,6 +1454,90 @@ class ConsultingAgent(SubAgentBase):
         result += "\n[출처: 서강대 2026 모집요강]"
         
         return result
+    
+    def _parse_preprocessed_scores(self, preprocessed_text: str) -> Dict[str, Any]:
+        """
+        전처리된 성적 텍스트를 파싱하여 normalized_scores 형태로 변환
+        
+        형식 예시:
+        - 국어(화법과작문): 1등급 / 표준점수 140 / 백분위 98
+        - 수학(미적분): 2등급 / 표준점수 128 / 백분위 92 (추정)
+        
+        Returns:
+            normalized_scores 형태의 딕셔너리
+        """
+        normalized = {
+            "과목별_성적": {},
+            "추정_과목": [],
+            "선택과목": {}
+        }
+        
+        lines = preprocessed_text.strip().split("\n")
+        
+        for line in lines:
+            line = line.strip()
+            if not line or not line.startswith("-"):
+                continue
+            
+            # "- 국어(화법과작문): 1등급 / 표준점수 140 / 백분위 98 (추정)"
+            line = line[1:].strip()  # "-" 제거
+            
+            if ":" not in line:
+                continue
+            
+            subject_part, scores_part = line.split(":", 1)
+            subject_part = subject_part.strip()
+            scores_part = scores_part.strip()
+            
+            # 과목명과 선택과목 분리
+            subject_name = subject_part
+            elective = None
+            if "(" in subject_part and ")" in subject_part:
+                subject_name = subject_part.split("(")[0].strip()
+                elective = subject_part.split("(")[1].split(")")[0].strip()
+                normalized["선택과목"][subject_name] = elective
+            
+            # 추정 여부 확인
+            is_estimated = "(추정)" in scores_part
+            if is_estimated:
+                normalized["추정_과목"].append(subject_name)
+                scores_part = scores_part.replace("(추정)", "").strip()
+            
+            # 점수 파싱
+            grade = None
+            std_score = None
+            percentile = None
+            
+            # "1등급 / 표준점수 140 / 백분위 98" 형태 파싱
+            parts = [p.strip() for p in scores_part.split("/")]
+            
+            for part in parts:
+                if "등급" in part:
+                    match = re.search(r'(\d+)\s*등급', part)
+                    if match:
+                        grade = int(match.group(1))
+                elif "표준점수" in part:
+                    match = re.search(r'표준점수\s*(\d+)', part)
+                    if match:
+                        std_score = int(match.group(1))
+                    elif "없음" in part or "절대평가" in part:
+                        std_score = None
+                elif "백분위" in part:
+                    match = re.search(r'백분위\s*([\d.]+)', part)
+                    if match:
+                        percentile = float(match.group(1))
+            
+            # normalized_scores에 추가
+            normalized["과목별_성적"][subject_name] = {
+                "원본_입력": None,
+                "등급": grade,
+                "표준점수": std_score,
+                "백분위": percentile,
+                "선택과목": elective,
+                "추정됨": is_estimated
+            }
+        
+        return normalized
 
 
 class TeacherAgent(SubAgentBase):
@@ -1536,12 +1649,18 @@ def get_agent(agent_name: str) -> SubAgentBase:
     raise ValueError(f"알 수 없는 에이전트: {agent_name}")
 
 
-async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
+async def execute_sub_agents(
+    execution_plan: list, 
+    extracted_scores: Dict[str, Any] = None,
+    user_message: str = None
+) -> Dict[str, Any]:
     """
     Execution Plan에 따라 Sub Agent들 실행
     
     Args:
         execution_plan: Orchestration Agent가 생성한 실행 계획
+        extracted_scores: Orchestration Agent가 추출한 구조화된 성적 (우선 사용)
+        user_message: 사용자의 원본 메시지 (fallback용)
         
     Returns:
         {
@@ -1551,6 +1670,14 @@ async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
         }
     """
     results = {}
+    
+    # extracted_scores 전달 상태 로그
+    if extracted_scores:
+        _log(f"   📊 Orchestration에서 전달받은 성적: {len(extracted_scores)}개 과목")
+        for subj, info in extracted_scores.items():
+            _log(f"      - {subj}: {info.get('type')} {info.get('value')}")
+    else:
+        _log("   ℹ️  Orchestration에서 전달받은 성적 없음")
 
     for step in execution_plan:
         step_num = step.get("step")
@@ -1558,7 +1685,41 @@ async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
         query = step.get("query")
 
         _log(f"   Step {step_num}: {agent_name}")
-        _log(f"   Query: {query}")
+        
+        # 컨설팅 agent 호출 시 성적 전처리
+        if "컨설팅" in agent_name:
+            try:
+                # 1순위: Orchestration이 추출한 extracted_scores 사용
+                if extracted_scores:
+                    from .score_preprocessing import build_preprocessed_query
+                    
+                    _log("   📊 Orchestration 추출 성적으로 전처리 시작...")
+                    preprocessed_query = build_preprocessed_query(extracted_scores, query)
+                    
+                    if preprocessed_query != query:
+                        query = preprocessed_query
+                        _log(f"   ✅ 성적 전처리 완료 - {len(extracted_scores)}개 과목 정규화")
+                    else:
+                        _log("   ℹ️  성적 정보 없음 - 원본 쿼리 사용")
+                
+                # 2순위 (fallback): 정규식 기반 전처리
+                elif user_message:
+                    from .score_preprocessing import preprocess_scores_for_query
+                    
+                    _log("   📊 정규식 기반 성적 전처리 시작 (fallback)...")
+                    preprocessed_query = preprocess_scores_for_query(user_message, query)
+                    
+                    if preprocessed_query != query:
+                        query = preprocessed_query
+                        _log("   ✅ 성적 전처리 완료 (fallback)")
+                    else:
+                        _log("   ℹ️  성적 정보 없음 - 원본 쿼리 사용")
+                        
+            except Exception as e:
+                _log(f"   ⚠️  성적 전처리 실패: {e}")
+                # 실패해도 원본 쿼리로 계속 진행
+        
+        _log(f"   Query: {query[:150]}..." if len(query) > 150 else f"   Query: {query}")
 
         try:
             agent = get_agent(agent_name)

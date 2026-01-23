@@ -119,12 +119,19 @@ async def chat(request: ChatRequest):
         execution_plan = orchestration_result.get("execution_plan", [])
         answer_structure = orchestration_result.get("answer_structure", [])
         direct_response = orchestration_result.get("direct_response", None)
+        extracted_scores = orchestration_result.get("extracted_scores", {})
         
         log_and_emit("")
         log_and_emit(f"📋 Orchestration 결과:")
         log_and_emit(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
         log_and_emit(f"   실행 계획: {len(execution_plan)}개 step")
         log_and_emit(f"   답변 구조: {len(answer_structure)}개 섹션")
+        
+        # extracted_scores 로그
+        if extracted_scores:
+            log_and_emit(f"   📊 추출된 성적: {len(extracted_scores)}개 과목")
+        else:
+            log_and_emit(f"   ℹ️  성적 추출 없음")
         
         # 즉시 응답 체크
         if direct_response:
@@ -194,7 +201,11 @@ async def chat(request: ChatRequest):
             log_and_emit(f"   Query: {step['query']}")
         
         sub_start = time.time()
-        sub_agent_results = await execute_sub_agents(execution_plan)
+        sub_agent_results = await execute_sub_agents(
+            execution_plan,
+            extracted_scores=extracted_scores,
+            user_message=message
+        )
         sub_time = time.time() - sub_start
         
         log_and_emit("")
@@ -397,12 +408,19 @@ async def chat_stream(request: ChatRequest):
             execution_plan = orchestration_result.get("execution_plan", [])
             answer_structure = orchestration_result.get("answer_structure", [])
             direct_response = orchestration_result.get("direct_response", None)
+            extracted_scores = orchestration_result.get("extracted_scores", {})
             
             yield send_log("")
             yield send_log(f"📋 Orchestration 결과:")
             yield send_log(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
             yield send_log(f"   실행 계획: {len(execution_plan)}개 step")
             yield send_log(f"   답변 구조: {len(answer_structure)}개 섹션")
+            
+            # extracted_scores 로그
+            if extracted_scores:
+                yield send_log(f"   📊 추출된 성적: {len(extracted_scores)}개 과목")
+            else:
+                yield send_log(f"   ℹ️  성적 추출 없음")
             
             # 즉시 응답 체크
             if direct_response:
@@ -478,7 +496,11 @@ async def chat_stream(request: ChatRequest):
             # Sub Agents 실행 (백그라운드)
             sub_start = time.time()
             async def run_subs():
-                return await execute_sub_agents(execution_plan)
+                return await execute_sub_agents(
+                    execution_plan,
+                    extracted_scores=extracted_scores,
+                    user_message=message
+                )
             
             subs_task = asyncio.create_task(run_subs())
             

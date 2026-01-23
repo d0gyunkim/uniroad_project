@@ -142,10 +142,23 @@ async def full_pipeline(request: ChatRequest):
         
         execution_plan = orchestration_result.get("execution_plan", [])
         answer_structure = orchestration_result.get("answer_structure", [])
+        extracted_scores = orchestration_result.get("extracted_scores", {})
         
-        # 2. Sub Agents 실행
+        # extracted_scores 로그 (디버깅용)
+        if extracted_scores:
+            print(f"📊 Orchestration에서 추출된 성적: {len(extracted_scores)}개 과목")
+            for subj, info in extracted_scores.items():
+                print(f"   - {subj}: {info}")
+        else:
+            print("ℹ️  Orchestration에서 성적 추출 없음 (extracted_scores 비어있음)")
+        
+        # 2. Sub Agents 실행 (Orchestration이 추출한 성적 우선 사용)
         from services.multi_agent.sub_agents import execute_sub_agents
-        sub_agent_results = await execute_sub_agents(execution_plan)
+        sub_agent_results = await execute_sub_agents(
+            execution_plan, 
+            extracted_scores=extracted_scores,
+            user_message=request.message  # fallback용
+        )
         
         # 3. Final Agent
         from services.multi_agent.final_agent import generate_final_answer

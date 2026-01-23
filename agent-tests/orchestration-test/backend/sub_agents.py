@@ -114,7 +114,20 @@ class ConsultingAgent(SubAgentBase):
     async def execute(self, query: str) -> Dict[str, Any]:
         """성적 기반 합격 가능 대학 분석"""
 
-        # 쿼리에서 성적 정보 추출 시도
+        # 전처리된 성적 확인
+        actual_query = query
+        preprocessed_scores_text = ""
+        
+        if "[전처리된 성적]" in query:
+            print("✅ 전처리된 성적 감지")
+            parts = query.split("[원본 쿼리]")
+            if len(parts) == 2:
+                preprocessed_scores_text = parts[0].replace("[전처리된 성적]", "").strip()
+                actual_query = parts[1].strip()
+                print(f"   전처리된 성적:\n{preprocessed_scores_text[:200]}...")
+                print(f"   실제 쿼리: {actual_query}")
+        
+        # 쿼리에서 성적 정보 추출 시도 (fallback)
         grade_info = self._extract_grade_from_query(query)
 
         # DB에서 데이터 조회
@@ -138,9 +151,16 @@ class ConsultingAgent(SubAgentBase):
         }
 
         # Gemini로 분석
+        student_score_section = ""
+        if preprocessed_scores_text:
+            student_score_section = f"""
+## 학생 성적 (정규화됨)
+{preprocessed_scores_text}
+"""
+        
         system_prompt = f"""당신은 대학 입시 데이터 분석 전문가입니다.
 질문에 답변하기 위해 필요한 팩트와 데이터만 추출하여 제공하세요.
-
+{student_score_section}
 ## 가용 데이터
 {json.dumps(all_data, ensure_ascii=False, indent=2)[:8000]}
 
@@ -160,7 +180,7 @@ class ConsultingAgent(SubAgentBase):
 
         try:
             response = self.model.generate_content(
-                f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
+                f"{system_prompt}\n\n질문: {actual_query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
                 generation_config={"temperature": 0.1, "max_output_tokens": 1024}
             )
 
@@ -279,14 +299,38 @@ def get_agent(agent_name: str) -> SubAgentBase:
         raise ValueError(f"알 수 없는 에이전트: {agent_name}")
 
 
-async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
-    """Execution Plan에 따라 Sub Agent들 실행"""
+async def execute_sub_agents(
+    execution_plan: list,
+    extracted_scores: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Execution Plan에 따라 Sub Agent들 실행
+    
+    Args:
+        execution_plan: 실행 계획
+        extracted_scores: Orchestration이 추출한 구조화된 성적
+    """
     results = {}
 
     for step in execution_plan:
         step_num = step.get("step")
         agent_name = step.get("agent")
         query = step.get("query")
+
+        # 컨설팅 agent 호출 시 성적 전처리
+        if "컨설팅" in agent_name and extracted_scores:
+            try:
+                from score_preprocessing import build_preprocessed_query
+                
+                print(f"📊 성적 전처리: {len(extracted_scores)}개 과목")
+                preprocessed_query = build_preprocessed_query(extracted_scores, query)
+                
+                if preprocessed_query != query:
+                    query = preprocessed_query
+                    print(f"✅ 전처리 완료")
+                    
+            except Exception as e:
+                print(f"⚠️ 성적 전처리 실패: {e}")
 
         try:
             agent = get_agent(agent_name)

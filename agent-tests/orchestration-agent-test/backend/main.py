@@ -145,12 +145,61 @@ DEFAULT_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchest
    - 예: "국어 1등급, 수학 1등급, 영어 2등급, 탐구1 3등급, 탐구2 2등급일 때의 예상 표준점수대 산출 및 2025학년도 입결 기준 서울대, 연세대, 고려대, 성균관대, 경희대 합격 가능성 분석"
 
 ## 역할
-학생의 질문을 분석하여 두 가지를 결정합니다:
+학생의 질문을 분석하여 세 가지를 결정합니다:
 1. **Execution Plan**: 어떤 Sub Agent를 어떤 순서로 호출할지
-2. **Answer Structure**: 최종 답변이 어떤 구조로 구성될지 (목차/템플릿)
+2. **Answer Structure**: 최종 답변이 어떤 구조로 구성될지
+3. **Extracted Scores**: 컨설팅 agent 호출 시 성적 정보 구조화 (조건부)
 
 ## 가용 에이전트 목록
 {agents}
+
+## 에이전트 역할
+- 특정 대학이 언급되면 해당 대학 agent 호출
+- 공부 계획, 멘탈 관리 질문은 선생님 agent 호출
+- 합격 가능성, 대학 추천, 점수 환산 질문은 컨설팅 agent 호출
+
+## 성적 정보 추출 규칙 (매우 중요!)
+**컨설팅 agent를 호출할 계획이고, 사용자 질문에 성적 정보가 포함된 경우에만** `extracted_scores` 필드를 생성하세요.
+
+### 생성 조건
+- ✅ 컨설팅 agent 호출 예정 + 성적 정보 있음 → extracted_scores 생성
+- ❌ 선생님/대학 agent만 호출 → extracted_scores 생성하지 않음
+- ❌ 성적 정보 없음 → extracted_scores 생성하지 않음
+
+### 지원 입력 형식
+- 축약형: "나 11232야" → 순서: 국어/수학/영어/탐구1/탐구2 등급
+- 등급: "국어 1등급", "수학 2등급"
+- 표준점수: "국어 표준점수 140", "수학 140점" (100 이상은 표준점수)
+- 백분위: "국어 백분위 98"
+- 원점수: "국어 92점" (100점 만점, 100 미만)
+- 자연어: "국어가 1등급이고 수학도 1등급인데요"
+
+### 과목명 규칙
+- **주요 과목**: 국어, 수학, 영어, 한국사
+- **선택과목**: 선택과목이 언급되면 포함 (화법과작문, 언어와매체, 확률과통계, 미적분, 기하)
+- **탐구 과목**: 반드시 구체적 과목명으로 추출
+  - 사회탐구: 생활과윤리, 윤리와사상, 한국지리, 세계지리, 동아시아사, 세계사, 경제, 정치와법, 사회문화
+  - 과학탐구: 물리학1, 물리학2, 화학1, 화학2, 생명과학1, 생명과학2, 지구과학1, 지구과학2
+
+### 탐구 과목 추론 규칙
+사용자가 구체적 탐구 과목을 말하지 않은 경우:
+- 수학 선택과목이 "확률과통계"면 → 인문계로 추론 (생활과윤리, 사회문화)
+- 수학 선택과목이 "미적분" 또는 "기하"면 → 자연계로 추론 (생명과학1, 지구과학1)
+- 수학 선택과목 정보 없으면 → 인문계 기본값 (생활과윤리, 사회문화)
+
+### 출력 형식
+```json
+"extracted_scores": {{
+  "국어": {{"type": "등급", "value": 1, "선택과목": "화법과작문"}},
+  "수학": {{"type": "표준점수", "value": 140, "선택과목": "미적분"}},
+  "영어": {{"type": "등급", "value": 2}},
+  "생명과학1": {{"type": "등급", "value": 3}},
+  "지구과학1": {{"type": "등급", "value": 2}}
+}}
+```
+- type: "등급", "표준점수", "백분위", "원점수" 중 하나
+- value: 숫자 (등급은 1-9, 표준점수는 50-150, 백분위는 0-100)
+- 선택과목: 국어/수학만 해당, 없으면 생략
 
 ## 답변 구조 섹션 타입
 - `empathy`: 학생의 마음에 공감하는 따뜻한 위로 (1-2문장)
@@ -174,25 +223,40 @@ DEFAULT_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchest
 }}
 ```
 
-### 일반 처리 시 (Normal Processing)
+### 컨설팅 agent 호출 시 (성적 포함)
+```json
+{{
+  "user_intent": "사용자 의도 요약",
+  "extracted_scores": {{
+    "국어": {{"type": "등급", "value": 1, "선택과목": "화법과작문"}},
+    "수학": {{"type": "등급", "value": 1, "선택과목": "확률과통계"}},
+    "영어": {{"type": "등급", "value": 2}},
+    "생활과윤리": {{"type": "등급", "value": 3}},
+    "사회문화": {{"type": "등급", "value": 2}}
+  }},
+  "execution_plan": [
+    {{
+      "step": 1,
+      "agent": "컨설팅 agent",
+      "query": "2025학년도 입결 기준 서울대 합격 가능성 분석"
+    }}
+  ],
+  "answer_structure": [...]
+}}
+```
+
+### 다른 agent 호출 시 (성적 없음)
 ```json
 {{
   "user_intent": "사용자 의도 요약",
   "execution_plan": [
     {{
       "step": 1,
-      "agent": "에이전트 이름",
-      "query": "에이전트에게 전달할 구체적 쿼리"
+      "agent": "서울대 agent",
+      "query": "2026학년도 정시 모집요강 정보"
     }}
   ],
-  "answer_structure": [
-    {{
-      "section": 1,
-      "type": "섹션 타입",
-      "source_from": "Step{{N}}_Result 또는 null",
-      "instruction": "이 섹션에서 다룰 내용에 대한 구체적 지시"
-    }}
-  ]
+  "answer_structure": [...]
 }}
 ```
 
@@ -203,6 +267,7 @@ DEFAULT_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchest
 4. fact_check나 analysis가 있으면 반드시 해당 데이터를 가져올 execution_plan이 있어야 함
 5. source_from은 execution_plan의 step 번호와 매칭되어야 함 (예: "Step1_Result")
 6. agent 필드에는 가용 에이전트 목록에 있는 에이전트 이름만 사용
+7. **extracted_scores는 컨설팅 agent 호출 시에만 생성** (다른 경우 필드 자체를 생략)
 
 ## 간결성 원칙 (매우 중요!)
 - **불필요한 agent 호출 금지**: 간단한 질문에 여러 agent를 호출하지 마세요. 질문의 복잡도에 비례하여 최소한의 agent만 호출하세요.
@@ -257,6 +322,9 @@ class OrchestrationResponse(BaseModel):
     raw_response: str
     prompt_used: str
     prompt_length: int
+    # 성적 전처리 관련 추가 필드
+    extracted_scores: Optional[Dict] = None
+    preprocessed_queries: Optional[List[Dict]] = None  # 각 컨설팅 agent 쿼리에 대한 전처리 결과
 
 class SavePromptRequest(BaseModel):
     name: str
@@ -346,6 +414,37 @@ async def run_orchestration(request: OrchestrationRequest):
                 prompt_length=len(system_prompt)
             )
         
+        # extracted_scores가 있으면 성적 전처리 수행
+        extracted_scores = result.get("extracted_scores")
+        preprocessed_queries = None
+        
+        if extracted_scores:
+            from score_preprocessing import build_preprocessed_query
+            
+            preprocessed_queries = []
+            execution_plan = result.get("execution_plan", [])
+            
+            for step in execution_plan:
+                agent_name = step.get("agent", "")
+                original_query = step.get("query", "")
+                
+                # 컨설팅 agent 호출인 경우 전처리
+                if "컨설팅" in agent_name:
+                    preprocessed = build_preprocessed_query(extracted_scores, original_query)
+                    preprocessed_queries.append({
+                        "step": step.get("step"),
+                        "agent": agent_name,
+                        "original_query": original_query,
+                        "preprocessed_query": preprocessed
+                    })
+                else:
+                    preprocessed_queries.append({
+                        "step": step.get("step"),
+                        "agent": agent_name,
+                        "original_query": original_query,
+                        "preprocessed_query": None  # 컨설팅이 아니면 전처리 안 함
+                    })
+        
         return OrchestrationResponse(
             status="success",
             user_intent=result.get("user_intent", ""),
@@ -354,7 +453,9 @@ async def run_orchestration(request: OrchestrationRequest):
             direct_response=result.get("direct_response"),
             raw_response=raw_response,
             prompt_used=system_prompt,
-            prompt_length=len(system_prompt)
+            prompt_length=len(system_prompt),
+            extracted_scores=extracted_scores,
+            preprocessed_queries=preprocessed_queries
         )
         
     except Exception as e:
