@@ -1,7 +1,7 @@
 """
 Sub Agents
 - 대학별 Agent: Supabase에서 해당 대학 해시태그 문서 검색
-- 컨설팅 Agent: 임시 DB에서 입결/환산점수 데이터 조회
+- 컨설팅 Agent: Supabase에서 입결/환산점수 데이터 조회
 - 선생님 Agent: 학습 계획 및 멘탈 관리 조언
 """
 
