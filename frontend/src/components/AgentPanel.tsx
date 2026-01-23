@@ -201,38 +201,70 @@ function OrchestrationTab({ result }: { result: OrchestrationResult | null }) {
 
 // Sub Agents 탭
 function SubAgentsTab({ results }: { results: Record<string, SubAgentResult> | null }) {
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
+
   if (!results || Object.keys(results).length === 0) {
     return <EmptyState message="Sub Agent 실행 결과가 여기에 표시됩니다" />
   }
 
+  const toggleExpand = (key: string) => {
+    setExpandedItems(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(key)) {
+        newSet.delete(key)
+      } else {
+        newSet.add(key)
+      }
+      return newSet
+    })
+  }
+
   return (
     <div className="space-y-3">
-      {Object.entries(results).map(([key, result]) => (
-        <div key={key} className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-emerald-400 font-medium text-sm">
-              {key} ({result.agent})
-            </span>
-            <span
-              className={`text-xs px-2 py-0.5 rounded ${
-                result.status === 'success'
-                  ? 'bg-emerald-500 text-white'
-                  : 'bg-rose-500 text-white'
+      {Object.entries(results).map(([key, result]) => {
+        const isExpanded = expandedItems.has(key)
+        const resultText = result.result || '결과 없음'
+        const isLong = resultText.length > 500
+        
+        return (
+          <div key={key} className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-emerald-400 font-medium text-sm">
+                {key} ({result.agent})
+              </span>
+              <span
+                className={`text-xs px-2 py-0.5 rounded ${
+                  result.status === 'success'
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-rose-500 text-white'
+                }`}
+              >
+                {result.status}
+              </span>
+            </div>
+            <div 
+              className={`text-slate-300 text-xs whitespace-pre-wrap overflow-y-auto ${
+                isExpanded ? 'max-h-none' : 'max-h-64'
               }`}
             >
-              {result.status}
-            </span>
-          </div>
-          <div className="text-slate-300 text-xs whitespace-pre-wrap max-h-48 overflow-y-auto">
-            {result.result || '결과 없음'}
-          </div>
-          {result.sources && result.sources.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-slate-700">
-              <div className="text-slate-500 text-xs">출처: {result.sources.join(', ')}</div>
+              {resultText}
             </div>
-          )}
-        </div>
-      ))}
+            {isLong && (
+              <button 
+                onClick={() => toggleExpand(key)}
+                className="mt-2 text-xs text-emerald-400 hover:text-emerald-300"
+              >
+                {isExpanded ? '▲ 접기' : '▼ 전체 보기'}
+              </button>
+            )}
+            {result.sources && result.sources.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-slate-700">
+                <div className="text-slate-500 text-xs">출처: {result.sources.join(', ')}</div>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -18,11 +18,11 @@ from token_logger import log_token_usage
 from services.supabase_client import supabase_service
 from services.gemini_service import gemini_service
 from services.score_converter import ScoreConverter
-from services.school_score.khu_score_calculator import calculate_khu_score
-from services.school_score.snu_score_calculator import calculate_snu_score
-from services.school_score.yonsei_score_calculator import calculate_yonsei_score
-from services.school_score.korea_score_calculator import calculate_korea_score
-from services.school_score.sogang_score_calculator import calculate_sogang_score
+from services.khu_score_calculator import calculate_khu_score
+from services.snu_score_calculator import calculate_snu_score
+from services.yonsei_score_calculator import calculate_yonsei_score
+from services.korea_score_calculator import calculate_korea_score
+from services.sogang_score_calculator import calculate_sogang_score
 from services.data_standard import (
     korean_std_score_table,
     math_std_score_table,
@@ -32,14 +32,15 @@ from services.data_standard import (
     english_grade_data,
     history_grade_data
 )
-from .mock_database import (
-    get_admission_data_by_grade,
-    get_jeongsi_data_by_percentile,
-    get_score_conversion_info,
-    get_all_universities_data,
-    ADMISSION_DATA_SUSI,
-    ADMISSION_DATA_JEONGSI
-)
+# mock_database는 더 이상 사용하지 않음 (Supabase로 대체)
+# from .mock_database import (
+#     get_admission_data_by_grade,
+#     get_jeongsi_data_by_percentile,
+#     get_score_conversion_info,
+#     get_all_universities_data,
+#     ADMISSION_DATA_SUSI,
+#     ADMISSION_DATA_JEONGSI
+# )
 
 # 로그 콜백 (실시간 스트리밍용)
 _log_callback = None
@@ -397,15 +398,44 @@ class ConsultingAgent(SubAgentBase):
         _log("="*60)
         _log(f"📊 컨설팅 Agent 실행")
         _log("="*60)
-        _log(f"쿼리: {query}")
+        _log(f"쿼리: {query[:200]}..." if len(query) > 200 else f"쿼리: {query}")
 
-        # 쿼리에서 성적 정보 추출 및 정규화
-        raw_grade_info = self._extract_grade_from_query(query)
-        _log(f"   추출된 원본 성적: {raw_grade_info}")
+        # 전처리된 성적이 있는지 확인
+        preprocessed = False
+        normalized_scores = None
+        raw_grade_info = {}
+        actual_query = query
         
-        # 점수 정규화 (등급-표준점수-백분위)
-        normalized_scores = self._normalize_scores(raw_grade_info)
-        _log(f"   정규화된 성적: {json.dumps(normalized_scores, ensure_ascii=False, indent=2)}")
+        if "[전처리된 성적]" in query and "[원본 쿼리]" in query:
+            try:
+                _log("   ✅ 전처리된 성적 감지 - 파싱 시작")
+                
+                # 전처리된 성적 섹션과 원본 쿼리 분리
+                parts = query.split("[원본 쿼리]")
+                preprocessed_section = parts[0].replace("[전처리된 성적]", "").strip()
+                actual_query = parts[1].strip() if len(parts) > 1 else query
+                
+                # 전처리된 성적 파싱
+                normalized_scores = self._parse_preprocessed_scores(preprocessed_section)
+                
+                if normalized_scores and normalized_scores.get("과목별_성적"):
+                    preprocessed = True
+                    _log(f"   📋 파싱된 과목 수: {len(normalized_scores['과목별_성적'])}개")
+                else:
+                    _log("   ⚠️  전처리된 성적 파싱 실패 - fallback")
+                    
+            except Exception as e:
+                _log(f"   ⚠️  전처리된 성적 파싱 오류: {e} - fallback")
+        
+        # Fallback: 기존 방식으로 성적 추출
+        if not preprocessed:
+            _log("   📝 기존 방식으로 성적 추출")
+            raw_grade_info = self._extract_grade_from_query(query)
+            _log(f"   추출된 원본 성적: {raw_grade_info}")
+            
+            # 점수 정규화 (등급-표준점수-백분위)
+            normalized_scores = self._normalize_scores(raw_grade_info)
+            _log(f"   정규화된 성적: {json.dumps(normalized_scores, ensure_ascii=False, indent=2)}")
 
         # 경희대 환산 점수 계산 (로컬 연산, API 호출 없음)
         khu_scores = calculate_khu_score(normalized_scores)
@@ -458,7 +488,7 @@ class ConsultingAgent(SubAgentBase):
         _log(f"📋 [전형결과 조회] Supabase에서 입결 데이터 검색")
         
         # 질의 분석: 정시/수시 구분 및 대학명 추출
-        query_analysis = self._analyze_query(query)
+        query_analysis = self._analyze_query(actual_query if preprocessed else query)
         _log(f"   질의 분석: {json.dumps(query_analysis, ensure_ascii=False)}")
         
         # Supabase에서 전형결과 문서 조회
@@ -466,9 +496,10 @@ class ConsultingAgent(SubAgentBase):
             query_analysis, normalized_scores
         )
         
-        # 기존 mock_database 데이터는 백업용으로 유지 (없으면 None)
-        susi_data = None
-        jeongsi_data = None
+        # 평균 백분위 계산 (로그용)
+        avg_percentile = self._calculate_average_percentile(normalized_scores)
+        if avg_percentile:
+            _log(f"   평균 백분위: {avg_percentile}")
         
         # 정규화된 학생 성적과 전형결과 데이터 결합
         all_data = {
@@ -502,22 +533,12 @@ class ConsultingAgent(SubAgentBase):
             # 서강대 환산 점수 포맷팅
             sogang_scores_text = self._format_sogang_scores(sogang_scores)
             
-            # 전형결과 데이터 포맷팅
+            # 전형결과 데이터 포맷팅 (Supabase에서 가져온 실제 데이터)
             admission_results_text = self._format_admission_results(admission_results)
             
-            # 프롬프트 길이 확인 및 제한
-            _log(f"   📏 프롬프트 구성 요소 길이:")
-            _log(f"      - normalized_scores_text: {len(normalized_scores_text)}자")
-            _log(f"      - khu_scores_text: {len(khu_scores_text)}자")
-            _log(f"      - snu_scores_text: {len(snu_scores_text)}자")
-            _log(f"      - yonsei_scores_text: {len(yonsei_scores_text)}자")
-            _log(f"      - korea_scores_text: {len(korea_scores_text)}자")
-            _log(f"      - sogang_scores_text: {len(sogang_scores_text)}자")
-            _log(f"      - admission_results_text: {len(admission_results_text)}자")
-            
-            # 전형결과 데이터가 너무 길면 제한 (최대 8000자)
+            # 전형결과 데이터가 너무 길면 제한 (최대 10000자)
             if len(admission_results_text) > 10000:
-                _log(f"   ⚠️ 전형결과 데이터가 너무 깁니다 ({len(admission_results_text)}자). 8000자로 제한합니다.")
+                _log(f"   ⚠️ 전형결과 데이터가 너무 깁니다 ({len(admission_results_text)}자). 10000자로 제한합니다.")
                 admission_results_text = admission_results_text[:10000] + "\n\n... (전형결과 데이터 일부 생략)"
             
             system_prompt = f"""당신은 대학 입시 데이터 분석 전문가입니다.
@@ -541,14 +562,14 @@ class ConsultingAgent(SubAgentBase):
 ## 서강대 2026 환산 점수
 {sogang_scores_text}
 
-## 전형결과 데이터 (2025학년도 입결 정보)
+## 전형결과 데이터 (실제 입결 정보)
 {admission_results_text}
 
-## 출력 규칙 (필수 - 반드시 준수)
+## 출력 규칙 (필수)
 1. **반드시 3개 섹션 모두 포함**: 
    - 【학생 성적 정규화】
    - 【대학별 환산 점수】 (질문에 언급된 대학 또는 정시인 경우 5개 대학 모두)
-   - 【2025학년도 전형결과 비교】 (학생 환산 점수와 실제 합격 점수 비교)
+   - 【전형결과 비교】 (학생 환산 점수와 실제 합격 점수 비교)
 2. **환산 점수 먼저 명확히 제시**: 질문에 언급된 대학의 환산 점수를 먼저 보여주세요
 3. **전형결과 데이터와 비교**: 환산 점수와 전형결과 문서의 실제 점수/등급을 비교하세요
 4. **구체적인 학과 정보 제공**: 전형결과 데이터에서 해당 환산 점수로 합격한 학과와 그 점수를 구체적으로 제시하세요
@@ -558,70 +579,32 @@ class ConsultingAgent(SubAgentBase):
 8. "합격가능", "도전가능", "거리가 있다" 같은 판단이나 평가는 하지 말고 오직 사실과 데이터만 제공
 9. 마크다운 문법(**, *, #, ##, ###) 절대 사용 금지
 10. 글머리 기호는 - 또는 • 만 사용
-11. **출처 표시는 생략** (citation 비활성화)
 
 ## 출력 형식 예시
 
-예시 1: "서울대 어디 갈 수 있을까?"
+예시 1: "경희대 어디 갈 수 있을까?"
 【학생 성적 정규화】
-- 국어(언어와매체): 2등급 / 표준점수 132 / 백분위 92
+- 국어(화법과작문): 2등급 / 표준점수 132 / 백분위 92
 - 수학(확률과통계): 2등급 / 표준점수 128 / 백분위 89
 - 영어: 2등급 / 백분위 82
-- 탐구1: 3등급 / 표준점수 57 / 백분위 83
-- 탐구2: 3등급 / 표준점수 58 / 백분위 85
+- 탐구1(생활과윤리): 1등급 / 표준점수 70 / 백분위 98
+- 탐구2(사회문화): 2등급 / 표준점수 67 / 백분위 92
 
-【서울대 2026 환산 점수】
-- 일반전형: 375.5점 (1000점: 375.5)
+【경희대 2026 환산 점수】
+- 인문: 520.5점 / 600점
+- 사회: 525.3점 / 600점
 
-【2025학년도 서울대 정시 전형결과 비교】
-- 학생 환산 점수: 375.5점
-- 전형결과 데이터에서 확인된 실제 합격 점수:
-  • 공과대학 기계공학부: 최종합격자 평균 380.2점
-  • 공과대학 전기정보공학부: 최종합격자 평균 385.1점
-  • 인문대학 국어국문학과: 최종합격자 평균 372.8점
+【전형결과 비교】
+- 학생 환산 점수: 인문 520.5점, 사회 525.3점
+- 2025학년도 경희대 정시 전형결과:
+  • 경영대학 경영학과: 최종합격자 평균 515.2점
+  • 인문대학 국어국문학과: 최종합격자 평균 510.8점
+  • 정경대학 경제학과: 최종합격자 평균 518.5점"""
 
-예시 2: "23231로 어디 갈 수 있어?" (정시)
-【학생 성적 정규화】
-- 국어: 2등급, 수학: 3등급, 영어: 2등급, 탐구1: 3등급, 탐구2: 1등급
-
-【5개 대학 환산 점수】
-- 경희대 인문: 420.5점 / 600점
-- 서울대 일반전형: 360.2점
-- 연세대 인문: 720.3점 / 1000점
-- 고려대 인문: 650.1점 / 1000점
-- 서강대 인문: 480.5점 (B형)
-
-【2025학년도 정시 전형결과 비교】
-- 경희대 (학생: 420.5점):
-  • 경영대학 경영학과: 최종합격자 평균 415.2점
-  • 인문대학 국어국문학과: 최종합격자 평균 410.8점
-- 서울대 (학생: 360.2점):
-  • 인문대학 국어국문학과: 최종합격자 평균 355.1점
-- 연세대 (학생: 720.3점):
-  • 문과대학 국어국문학과: 최종합격자 평균 715.2점
-
-## 중요 지침 (반드시 준수)
-- **반드시 3개 섹션 모두 포함**: 【학생 성적 정규화】, 【대학별 환산 점수】, 【2025학년도 전형결과 비교】
-- 환산 점수를 먼저 명확히 제시하세요
-- 전형결과 데이터에서 실제 점수와 비교하세요
-- 구체적인 학과명과 점수를 제시하세요
-- 판단이나 평가는 하지 말고 사실만 나열하세요
-- 전형결과 데이터가 없으면 "전형결과 데이터 없음"이라고만 표시하세요
-- 출처 표시는 생략하세요 (citation 비활성화)"""
-
-        # 최종 프롬프트 구성
-        final_prompt = f"{system_prompt}\n\n질문: {query}\n\n위 예시 형식을 정확히 따라서 답변하세요. 반드시 다음 3가지 섹션을 모두 포함해야 합니다:\n1. 【학생 성적 정규화】\n2. 【대학별 환산 점수】\n3. 【2025학년도 전형결과 비교】"
-        
-        _log(f"   📏 최종 프롬프트 길이: {len(final_prompt)}자")
-        
-        # 프롬프트가 너무 길면 경고
-        if len(final_prompt) > 30000:
-            _log(f"   ⚠️ 프롬프트가 매우 깁니다 ({len(final_prompt)}자). Gemini가 처리하지 못할 수 있습니다.")
-        
         try:
             response = self.model.generate_content(
-                final_prompt,
-                generation_config={"temperature": 0.1, "max_output_tokens": 20000},
+                f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
+                generation_config={"temperature": 0.1, "max_output_tokens": 30000},
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
@@ -642,35 +625,27 @@ class ConsultingAgent(SubAgentBase):
                     details=self.name
                 )
 
-            # finish_reason 확인 (디버깅)
-            if hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                finish_reason = getattr(candidate, 'finish_reason', None)
-                safety_ratings = getattr(candidate, 'safety_ratings', [])
-                _log(f"   🔍 finish_reason: {finish_reason}")
-                _log(f"   🔍 safety_ratings: {safety_ratings}")
-                
-                if finish_reason and finish_reason != 1:  # 1 = STOP (정상 종료)
-                    _log(f"   ⚠️ 비정상 종료 감지: finish_reason={finish_reason}")
-                    if 'SAFETY' in str(finish_reason):
-                        _log(f"   ⚠️ 안전 필터링으로 차단됨")
-                    if 'MAX_TOKENS' in str(finish_reason):
-                        _log(f"   ⚠️ 최대 토큰 수 도달 (하지만 39토큰만 생성됨 - 이상함)")
-
             result_text = response.text
             
-            # 응답 길이 확인
-            _log(f"   📝 응답 텍스트 길이: {len(result_text)}자")
-            if len(result_text) < 100:
-                _log(f"   ⚠️ 응답이 너무 짧습니다! 실제 내용: {result_text[:200]}")
+            # citations 구성 - Supabase 전형결과 데이터 포함
+            citations = []
             
-            # citations 구성 - Final Agent로 전달하지 않음 (비활성화)
-            # citations는 Final Agent에서 사용하지 않으므로 아예 전달하지 않음
+            # 전형결과 데이터에서 citations 가져오기
+            if admission_results and admission_results.get("citations"):
+                citations.extend(admission_results["citations"])
+            
+            # 점수 변환이 실제로 이루어진 경우에만 산출방식 문서 추가
+            if normalized_scores and normalized_scores.get("과목별_성적"):
+                citations.append({
+                    "text": "표준점수·백분위 산출 방식",
+                    "source": "유니로드 2026 수능 표준점수 및 백분위 산출 방식 문서",
+                    "url": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf"
+                })
 
             _log(f"   분석 완료")
             _log("="*60)
 
-            # sources 목록 구성
+            # sources 목록 구성 - Supabase 전형결과 데이터 포함
             sources = []
             if admission_results and admission_results.get("sources"):
                 sources.extend(admission_results["sources"])
@@ -680,13 +655,13 @@ class ConsultingAgent(SubAgentBase):
             return {
                 "agent": self.name,
                 "status": "success",
-                "query": query,
+                "query": actual_query if preprocessed else query,
                 "result": result_text,
                 "grade_info": raw_grade_info,
                 "normalized_scores": normalized_scores,  # 정규화된 성적 추가
                 "sources": sources,
-                "source_urls": []
-                # citations는 Final Agent로 전달하지 않음 (비활성화)
+                "source_urls": [],
+                "citations": citations
             }
 
         except Exception as e:
@@ -1482,6 +1457,136 @@ class ConsultingAgent(SubAgentBase):
         
         return result
     
+    def _parse_preprocessed_scores(self, preprocessed_text: str) -> Dict[str, Any]:
+        """
+        전처리된 성적 텍스트를 파싱하여 normalized_scores 형태로 변환
+        
+        형식 예시:
+        - 국어(화법과작문): 1등급 / 표준점수 140 / 백분위 98
+        - 수학(미적분): 2등급 / 표준점수 128 / 백분위 92 (추정)
+        - 생활과윤리: 1등급 / 표준점수 70 / 백분위 98
+        
+        Returns:
+            normalized_scores 형태의 딕셔너리
+        """
+        normalized = {
+            "과목별_성적": {},
+            "추정_과목": [],
+            "선택과목": {}
+        }
+        
+        # 탐구 과목 매핑 (실제 과목명 -> 탐구1, 탐구2)
+        social_subjects = ["사회문화", "생활과윤리", "윤리와사상", "한국지리", "세계지리", 
+                          "동아시아사", "세계사", "정치와법", "경제"]
+        science_subjects = ["물리학1", "물리학2", "화학1", "화학2", 
+                           "생명과학1", "생명과학2", "지구과학1", "지구과학2"]
+        all_inquiry_subjects = social_subjects + science_subjects
+        
+        # 탐구 과목 카운터
+        inquiry_count = 0
+        inquiry_mapping = {}  # 원본 과목명 -> 탐구1/탐구2
+        
+        lines = preprocessed_text.strip().split("\n")
+        
+        # 1차 스캔: 탐구 과목 파악
+        for line in lines:
+            line = line.strip()
+            if not line or not line.startswith("-"):
+                continue
+            
+            line_content = line[1:].strip()
+            if ":" not in line_content:
+                continue
+            
+            subject_part = line_content.split(":")[0].strip()
+            subject_name = subject_part.split("(")[0].strip() if "(" in subject_part else subject_part
+            
+            if subject_name in all_inquiry_subjects:
+                inquiry_count += 1
+                if inquiry_count == 1:
+                    inquiry_mapping[subject_name] = "탐구1"
+                elif inquiry_count == 2:
+                    inquiry_mapping[subject_name] = "탐구2"
+        
+        _log(f"   📊 탐구 과목 매핑: {inquiry_mapping}")
+        
+        # 2차 스캔: 실제 파싱
+        for line in lines:
+            line = line.strip()
+            if not line or not line.startswith("-"):
+                continue
+            
+            # "- 국어(화법과작문): 1등급 / 표준점수 140 / 백분위 98 (추정)"
+            line = line[1:].strip()  # "-" 제거
+            
+            if ":" not in line:
+                continue
+            
+            subject_part, scores_part = line.split(":", 1)
+            subject_part = subject_part.strip()
+            scores_part = scores_part.strip()
+            
+            # 과목명과 선택과목 분리
+            original_subject_name = subject_part
+            elective = None
+            if "(" in subject_part and ")" in subject_part:
+                original_subject_name = subject_part.split("(")[0].strip()
+                elective = subject_part.split("(")[1].split(")")[0].strip()
+            
+            # 탐구 과목이면 탐구1/탐구2로 매핑
+            if original_subject_name in inquiry_mapping:
+                subject_name = inquiry_mapping[original_subject_name]
+                # 원본 탐구 과목명을 elective에 저장
+                elective = original_subject_name
+                _log(f"   📊 탐구 매핑: {original_subject_name} -> {subject_name}")
+            else:
+                subject_name = original_subject_name
+            
+            if subject_name in ["국어", "수학"] and elective:
+                normalized["선택과목"][subject_name] = elective
+            
+            # 추정 여부 확인
+            is_estimated = "(추정)" in scores_part
+            if is_estimated:
+                normalized["추정_과목"].append(subject_name)
+                scores_part = scores_part.replace("(추정)", "").strip()
+            
+            # 점수 파싱
+            grade = None
+            std_score = None
+            percentile = None
+            
+            # "1등급 / 표준점수 140 / 백분위 98" 형태 파싱
+            parts = [p.strip() for p in scores_part.split("/")]
+            
+            for part in parts:
+                if "등급" in part:
+                    match = re.search(r'(\d+)\s*등급', part)
+                    if match:
+                        grade = int(match.group(1))
+                elif "표준점수" in part:
+                    match = re.search(r'표준점수\s*(\d+)', part)
+                    if match:
+                        std_score = int(match.group(1))
+                    elif "없음" in part or "절대평가" in part:
+                        std_score = None
+                elif "백분위" in part:
+                    match = re.search(r'백분위\s*([\d.]+)', part)
+                    if match:
+                        percentile = float(match.group(1))
+            
+            # normalized_scores에 추가
+            normalized["과목별_성적"][subject_name] = {
+                "원본_입력": None,
+                "등급": grade,
+                "표준점수": std_score,
+                "백분위": percentile,
+                "선택과목": elective,
+                "추정됨": is_estimated
+            }
+        
+        return normalized
+    
     def _analyze_query(self, query: str) -> Dict[str, Any]:
         """
         질의 분석: 정시/수시 구분 및 대학명 추출
@@ -1584,22 +1689,7 @@ class ConsultingAgent(SubAgentBase):
             # 디버깅: 전체 문서 수 확인
             _log(f"   전체 문서 수: {len(metadata_response.data)}개")
             
-            # 디버깅: 전형결과 관련 문서 샘플 확인
-            sample_docs = []
-            for doc in metadata_response.data[:5]:  # 처음 5개만
-                docu_cat = doc.get('docu_cat', '') or ''
-                title = doc.get('title', '') or ''
-                hashtags = doc.get('hashtags', []) or []
-                sample_docs.append({
-                    "title": title[:50],
-                    "docu_cat": docu_cat[:50] if docu_cat else "(없음)",
-                    "hashtags": hashtags[:3] if hashtags else []
-                })
-            _log(f"   문서 샘플 (처음 5개): {json.dumps(sample_docs, ensure_ascii=False, indent=2)}")
-            
-            # 전형결과 문서 필터링
             # 정시일 경우: 5개 대학만 (경희대학교, 고려대학교, 서울대학교, 연세대학교, 서강대학교)
-            # 수시일 경우: 모든 대학
             target_universities = {
                 "경희대학교": "경희대",
                 "고려대학교": "고려대",
@@ -1627,57 +1717,47 @@ class ConsultingAgent(SubAgentBase):
                 elif '정시' in docu_cat:
                     doc_type = '정시'
                 
-                # 전형 유형을 찾지 못했으면 스킵
                 if not doc_type:
-                    _log(f"   ⚠️ 전형 유형을 찾을 수 없음: {docu_cat}")
                     continue
                 
                 # 3단계: 정시일 경우 source 칼럼으로 5개 대학만 필터링
                 if doc_type == '정시':
                     if source not in target_universities:
-                        continue  # 정시는 5개 대학만
+                        continue
                     doc_univ_normalized = target_universities[source]
                 else:
-                    # 수시일 경우: source에서 대학명 추출 (모든 대학 포함)
-                    # source가 있으면 사용, 없으면 docu_cat에서 추출
                     if source and source in target_universities:
                         doc_univ_normalized = target_universities[source]
                     else:
-                        # source가 없거나 매핑에 없으면 docu_cat에서 추출 시도
-                        # 예: "2025년 한양대 수시 전형결과" -> 한양대
                         univ_match = re.search(r'([가-힣]+대(?:학교)?)', docu_cat)
                         if univ_match:
                             doc_univ_raw = univ_match.group(1)
                             doc_univ_normalized = doc_univ_raw.replace("대학교", "").replace("학교", "")
                         else:
-                            # 대학명을 찾을 수 없으면 source 그대로 사용
                             doc_univ_normalized = source.replace("대학교", "").replace("학교", "") if source else "알수없음"
                 
                 _log(f"   ✓ 전형결과 문서 발견: {source} ({doc_type}) - {docu_cat[:60]}")
                 
-                # 4단계: 캠퍼스 정보 확인 (경희대 등)
+                # 4단계: 캠퍼스 정보 확인
                 doc_campus = None
                 if "용인" in docu_cat or "용인" in title or "국제캠" in docu_cat or "국제캠" in title:
                     doc_campus = "용인캠"
                 elif "서울" in docu_cat or "서울" in title or "서울캠" in docu_cat or "서울캠" in title:
                     doc_campus = "서울캠"
                 
-                # 5단계: 질의 분석 결과와 비교
-                # 대학명 매칭 (명시 안 되면 모든 대학 포함)
+                # 5단계: 대학명 매칭
                 matched = False
                 if not universities:
-                    matched = True  # 대학명이 명시되지 않았으면 모든 대학 포함
+                    matched = True
                 else:
                     for req_univ in universities:
                         if req_univ == doc_univ_normalized or req_univ in doc_univ_normalized or doc_univ_normalized in req_univ:
                             matched = True
-                            _log(f"   ✓ 대학명 매칭: {req_univ} <-> {doc_univ_normalized}")
                             break
                 
                 # 전형 유형 필터링
                 if matched:
                     if admission_type == "both" or admission_type == doc_type:
-                        # 캠퍼스 필터링 (경희대 등)
                         if doc_univ_normalized in campus_info:
                             required_campus = campus_info[doc_univ_normalized]
                             if required_campus is None or doc_campus == required_campus:
@@ -1696,26 +1776,6 @@ class ConsultingAgent(SubAgentBase):
                             })
             
             _log(f"   발견된 전형결과 문서: {len(relevant_docs)}개")
-            
-            # 디버깅: 매칭 실패 시 정보 출력
-            if len(relevant_docs) == 0:
-                _log(f"   ⚠️ 전형결과 문서를 찾지 못했습니다.")
-                _log(f"   검색 조건: admission_type={admission_type}, universities={universities}, year={year}")
-                # 전형결과 관련 키워드가 있는 문서 찾기
-                potential_docs = []
-                for doc in metadata_response.data:
-                    docu_cat = doc.get('docu_cat', '') or ''
-                    title = doc.get('title', '') or ''
-                    search_text = (docu_cat + " " + title).lower()
-                    if any(kw in search_text for kw in ['전형결과', '입결', '커트']):
-                        potential_docs.append({
-                            "title": title[:60],
-                            "docu_cat": docu_cat[:60] if docu_cat else "(없음)"
-                        })
-                if potential_docs:
-                    _log(f"   전형결과 관련 문서 후보 ({len(potential_docs)}개):")
-                    for pd in potential_docs[:3]:  # 최대 3개만
-                        _log(f"      - {pd['title']} (docu_cat: {pd['docu_cat']})")
             
             # 문서 내용 로드 및 정리
             admission_results = {
@@ -1736,7 +1796,7 @@ class ConsultingAgent(SubAgentBase):
                 file_url = doc.get('file_url') or ''
                 docu_cat = doc.get('docu_cat', '') or ''
                 
-                # docu_cat에서 연도 추출 (없으면 기본값 사용)
+                # docu_cat에서 연도 추출
                 doc_year = year
                 year_match = re.search(r'(\d{4})년', docu_cat or title)
                 if year_match:
@@ -1794,12 +1854,11 @@ class ConsultingAgent(SubAgentBase):
                             "university": univ,
                             "campus": campus,
                             "type": doc_type,
-                            "content": full_content[:20000],  # 최대 20000자
+                            "content": full_content[:20000],
                             "title": title,
                             "file_url": file_url
                         }
                     else:
-                        # 이미 있으면 내용 추가
                         admission_results[doc_type][univ_key]["content"] += "\n\n" + full_content[:20000]
             
             return admission_results
@@ -1827,14 +1886,14 @@ class ConsultingAgent(SubAgentBase):
             for univ_key, data in susi_data.items():
                 univ = data.get("university", "")
                 campus = data.get("campus", "")
-                content = data.get("content", "")[:5000]  # 최대 5000자
+                content = data.get("content", "")[:5000]
                 
                 univ_name = univ
                 if campus:
                     univ_name += f" {campus}"
                 
                 lines.append(f"\n{univ_name}:")
-                lines.append(content[:5000])  # 내용 일부만 표시
+                lines.append(content[:5000])
                 lines.append(f"[출처: {data.get('title', '')}]")
         
         # 정시 데이터
@@ -1844,14 +1903,14 @@ class ConsultingAgent(SubAgentBase):
             for univ_key, data in jeongsi_data.items():
                 univ = data.get("university", "")
                 campus = data.get("campus", "")
-                content = data.get("content", "")[:5000]  # 최대 5000자
+                content = data.get("content", "")[:5000]
                 
                 univ_name = univ
                 if campus:
                     univ_name += f" {campus}"
                 
                 lines.append(f"\n{univ_name}:")
-                lines.append(content[:5000])  # 내용 일부만 표시
+                lines.append(content[:5000])
                 lines.append(f"[출처: {data.get('title', '')}]")
         
         if not lines:
@@ -1969,12 +2028,18 @@ def get_agent(agent_name: str) -> SubAgentBase:
     raise ValueError(f"알 수 없는 에이전트: {agent_name}")
 
 
-async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
+async def execute_sub_agents(
+    execution_plan: list, 
+    extracted_scores: Dict[str, Any] = None,
+    user_message: str = None
+) -> Dict[str, Any]:
     """
     Execution Plan에 따라 Sub Agent들 실행
     
     Args:
         execution_plan: Orchestration Agent가 생성한 실행 계획
+        extracted_scores: Orchestration Agent가 추출한 구조화된 성적 (우선 사용)
+        user_message: 사용자의 원본 메시지 (fallback용)
         
     Returns:
         {
@@ -1984,6 +2049,14 @@ async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
         }
     """
     results = {}
+    
+    # extracted_scores 전달 상태 로그
+    if extracted_scores:
+        _log(f"   📊 Orchestration에서 전달받은 성적: {len(extracted_scores)}개 과목")
+        for subj, info in extracted_scores.items():
+            _log(f"      - {subj}: {info.get('type')} {info.get('value')}")
+    else:
+        _log("   ℹ️  Orchestration에서 전달받은 성적 없음")
 
     for step in execution_plan:
         step_num = step.get("step")
@@ -1991,7 +2064,41 @@ async def execute_sub_agents(execution_plan: list) -> Dict[str, Any]:
         query = step.get("query")
 
         _log(f"   Step {step_num}: {agent_name}")
-        _log(f"   Query: {query}")
+        
+        # 컨설팅 agent 호출 시 성적 전처리
+        if "컨설팅" in agent_name:
+            try:
+                # 1순위: Orchestration이 추출한 extracted_scores 사용
+                if extracted_scores:
+                    from .score_preprocessing import build_preprocessed_query
+                    
+                    _log("   📊 Orchestration 추출 성적으로 전처리 시작...")
+                    preprocessed_query = build_preprocessed_query(extracted_scores, query)
+                    
+                    if preprocessed_query != query:
+                        query = preprocessed_query
+                        _log(f"   ✅ 성적 전처리 완료 - {len(extracted_scores)}개 과목 정규화")
+                    else:
+                        _log("   ℹ️  성적 정보 없음 - 원본 쿼리 사용")
+                
+                # 2순위 (fallback): 정규식 기반 전처리
+                elif user_message:
+                    from .score_preprocessing import preprocess_scores_for_query
+                    
+                    _log("   📊 정규식 기반 성적 전처리 시작 (fallback)...")
+                    preprocessed_query = preprocess_scores_for_query(user_message, query)
+                    
+                    if preprocessed_query != query:
+                        query = preprocessed_query
+                        _log("   ✅ 성적 전처리 완료 (fallback)")
+                    else:
+                        _log("   ℹ️  성적 정보 없음 - 원본 쿼리 사용")
+                        
+            except Exception as e:
+                _log(f"   ⚠️  성적 전처리 실패: {e}")
+                # 실패해도 원본 쿼리로 계속 진행
+        
+        _log(f"   Query: {query[:150]}..." if len(query) > 150 else f"   Query: {query}")
 
         try:
             agent = get_agent(agent_name)
