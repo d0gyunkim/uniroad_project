@@ -11,7 +11,7 @@ import asyncio
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from token_logger import log_token_usage
+from utils.token_logger import log_token_usage
 
 logger = setup_logger('gemini')
 

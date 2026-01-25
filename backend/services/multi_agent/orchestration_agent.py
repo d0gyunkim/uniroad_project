@@ -12,7 +12,7 @@ import os
 from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-from token_logger import log_token_usage
+from utils.token_logger import log_token_usage
 
 load_dotenv()
 

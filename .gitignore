@@ -19,7 +19,7 @@ backend/logs/
 *.log
 
 # Token usage tracking
-token_usage.csv
+backend/logs/token_usage.csv
 
 # Agent model configuration
 backend/services/multi_agent/agent_models_config.json

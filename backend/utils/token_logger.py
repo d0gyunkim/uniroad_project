@@ -1,6 +1,6 @@
 """
 토큰 사용량 로깅 유틸리티
-루트의 token_usage.csv에 모든 토큰 사용량 기록
+backend/logs/token_usage.csv에 모든 토큰 사용량 기록
 """
 import csv
 import os
@@ -8,9 +8,13 @@ from datetime import datetime
 from typing import Optional
 import threading
 
-# 루트 디렉토리 경로
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-TOKEN_LOG_FILE = os.path.join(ROOT_DIR, "token_usage.csv")
+# backend/logs 디렉토리 경로
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOGS_DIR = os.path.join(BACKEND_DIR, "logs")
+TOKEN_LOG_FILE = os.path.join(LOGS_DIR, "token_usage.csv")
+
+# logs 디렉토리가 없으면 생성
+os.makedirs(LOGS_DIR, exist_ok=True)
 
 # 스레드 안전을 위한 락
 _lock = threading.Lock()
