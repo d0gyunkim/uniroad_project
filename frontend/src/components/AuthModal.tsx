@@ -106,6 +106,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="홍길동"
+                maxLength={30}
                 className="w-full px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
             </div>
@@ -121,6 +122,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="example@email.com"
               required
+              maxLength={30}
               className="w-full px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
           </div>
@@ -136,10 +138,11 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               placeholder="••••••••"
               required
               minLength={6}
+              maxLength={30}
               className="w-full px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
             {isSignUp && (
-              <p className="text-xs text-gray-500 mt-2">최소 6자 이상</p>
+              <p className="text-xs text-gray-500 mt-2">최소 6자 이상, 최대 30자</p>
             )}
           </div>
 

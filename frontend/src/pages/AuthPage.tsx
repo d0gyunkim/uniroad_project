@@ -111,6 +111,7 @@ export default function AuthPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="홍길동"
+                  maxLength={30}
                   className="w-full px-4 sm:px-5 py-4 sm:py-3.5 text-base border-2 border-gray-300 rounded-xl sm:rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[52px] sm:min-h-[48px] transition-colors"
                 />
               </div>
@@ -126,6 +127,7 @@ export default function AuthPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="example@email.com"
                 required
+                maxLength={30}
                 className="w-full px-4 sm:px-5 py-4 sm:py-3.5 text-base border-2 border-gray-300 rounded-xl sm:rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[52px] sm:min-h-[48px] transition-colors"
               />
             </div>
@@ -141,10 +143,11 @@ export default function AuthPage() {
                 placeholder="••••••••"
                 required
                 minLength={6}
+                maxLength={30}
                 className="w-full px-4 sm:px-5 py-4 sm:py-3.5 text-base border-2 border-gray-300 rounded-xl sm:rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[52px] sm:min-h-[48px] transition-colors"
               />
               {isSignUp && (
-                <p className="text-xs sm:text-sm text-gray-500 mt-2">최소 6자 이상</p>
+                <p className="text-xs sm:text-sm text-gray-500 mt-2">최소 6자 이상, 최대 30자</p>
               )}
             </div>
 

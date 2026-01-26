@@ -3,7 +3,7 @@
 회원가입, 로그인, 로그아웃, 사용자 정보
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from services.supabase_client import supabase_service
 from middleware.auth import get_current_user
@@ -12,14 +12,14 @@ router = APIRouter()
 
 
 class SignUpRequest(BaseModel):
-    email: EmailStr
-    password: str
-    name: Optional[str] = None
+    email: EmailStr = Field(..., max_length=30)
+    password: str = Field(..., min_length=6, max_length=30)
+    name: Optional[str] = Field(None, max_length=30)
 
 
 class SignInRequest(BaseModel):
-    email: EmailStr
-    password: str
+    email: EmailStr = Field(..., max_length=30)
+    password: str = Field(..., max_length=30)
 
 
 class AuthResponse(BaseModel):
