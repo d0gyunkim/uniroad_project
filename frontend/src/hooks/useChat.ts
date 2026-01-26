@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getSupabaseClient } from '../lib/supabase'
+import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 
 export interface ChatSession {
@@ -8,6 +8,7 @@ export interface ChatSession {
   title: string
   created_at: string
   updated_at: string
+  message_count?: number
 }
 
 export interface ChatMessage {
@@ -15,6 +16,8 @@ export interface ChatMessage {
   session_id: string
   role: 'user' | 'assistant'
   content: string
+  sources?: string[]
+  source_urls?: string[]
   created_at: string
 }
 
@@ -33,16 +36,13 @@ export function useChat() {
       setLoading(true)
       
       const token = localStorage.getItem('access_token')
-      const client = getSupabaseClient(token || undefined)
+      if (!token) return
 
-      const { data, error } = await client
-        .from('chat_sessions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false })
+      const response = await axios.get('/api/sessions/', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
 
-      if (error) throw error
-      setSessions(data || [])
+      setSessions(response.data || [])
     } catch (error) {
       console.error('세션 목록 불러오기 실패:', error)
     } finally {
@@ -60,16 +60,13 @@ export function useChat() {
       setMessages([])
       
       const token = localStorage.getItem('access_token')
-      const client = getSupabaseClient(token || undefined)
+      if (!token) return
 
-      const { data, error } = await client
-        .from('chat_messages')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: true })
+      const response = await axios.get(`/api/sessions/${sessionId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
 
-      if (error) throw error
-      setMessages(data || [])
+      setMessages(response.data || [])
     } catch (error) {
       console.error('메시지 불러오기 실패:', error)
       setMessages([])
@@ -84,66 +81,34 @@ export function useChat() {
 
     try {
       const token = localStorage.getItem('access_token')
-      const client = getSupabaseClient(token || undefined)
+      if (!token) return null
 
-      const { data, error } = await client
-        .from('chat_sessions')
-        .insert({
-          user_id: user.id,
-          title: title.substring(0, 100), // 제목 길이 제한
-        })
-        .select()
-        .single()
+      const response = await axios.post('/api/sessions/', 
+        { title: title.substring(0, 100) },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
 
-      if (error) throw error
-      
       // 세션 목록 새로고침
       await loadSessions()
       
-      return data.id
+      return response.data.id
     } catch (error) {
       console.error('세션 생성 실패:', error)
       return null
     }
   }, [isAuthenticated, user?.id, loadSessions])
 
-  // 메시지 저장
+  // 메시지 저장 (채팅 API에서 자동으로 저장되므로 이 함수는 deprecated)
+  // 하위 호환성을 위해 유지하지만 실제로는 아무것도 하지 않음
   const saveMessage = useCallback(async (
     sessionId: string,
     role: 'user' | 'assistant',
     content: string
   ) => {
-    if (!isAuthenticated) return
-
-    try {
-      const token = localStorage.getItem('access_token')
-      const client = getSupabaseClient(token || undefined)
-
-      const { error } = await client
-        .from('chat_messages')
-        .insert({
-          session_id: sessionId,
-          role,
-          content,
-        })
-
-      if (error) throw error
-
-      // 세션의 updated_at 갱신
-      await client
-        .from('chat_sessions')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', sessionId)
-
-      // 세션 목록 새로고침
-      await loadSessions()
-      
-      // 메시지 목록 새로고침 (UI 업데이트를 위해)
-      await loadMessages(sessionId)
-    } catch (error) {
-      console.error('메시지 저장 실패:', error)
-    }
-  }, [isAuthenticated, loadMessages, loadSessions])
+    // 채팅 API(/api/chat/stream)에서 자동으로 메시지를 저장하므로
+    // 이 함수는 더 이상 필요하지 않습니다.
+    console.log('saveMessage는 deprecated되었습니다. 채팅 API에서 자동 저장됩니다.')
+  }, [])
 
   // 세션 선택
   const selectSession = useCallback(async (sessionId: string | null) => {
@@ -167,14 +132,13 @@ export function useChat() {
 
     try {
       const token = localStorage.getItem('access_token')
-      const client = getSupabaseClient(token || undefined)
+      if (!token) return
 
-      const { error } = await client
-        .from('chat_sessions')
-        .update({ title: title.substring(0, 100) })
-        .eq('id', sessionId)
+      await axios.patch(`/api/sessions/${sessionId}`,
+        { title: title.substring(0, 100) },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
 
-      if (error) throw error
       await loadSessions()
     } catch (error) {
       console.error('세션 제목 업데이트 실패:', error)
