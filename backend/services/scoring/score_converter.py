@@ -7,14 +7,14 @@ from typing import Dict, Optional, Union, Tuple
 
 try:
     # 패키지로 실행할 때
-    from backend.services.data_standard import (
+    from .data_standard import (
         korean_std_score_table,
         math_std_score_table,
         social_studies_data,
         science_inquiry_data,
         major_subjects_grade_cuts
     )
-except ModuleNotFoundError:
+except ImportError:
     # 직접 실행할 때
     from data_standard import (
         korean_std_score_table,

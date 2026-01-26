@@ -2,9 +2,11 @@
 파일 업로드 API 라우터
 """
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
-from services.gemini_pdf_service import gemini_pdf_service as pdf_service
-from services.classifier_service import classifier_service
-from services.embedding_service import embedding_service
+from services.documents import (
+    gemini_pdf_service as pdf_service,
+    classifier_service,
+    embedding_service
+)
 from services.supabase_client import supabase_service
 import time
 

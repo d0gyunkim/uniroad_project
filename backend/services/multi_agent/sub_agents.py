@@ -17,13 +17,15 @@ from utils.token_logger import log_token_usage
 
 from services.supabase_client import supabase_service
 from services.gemini_service import gemini_service
-from services.score_converter import ScoreConverter
-from services.khu_score_calculator import calculate_khu_score
-from services.snu_score_calculator import calculate_snu_score
-from services.yonsei_score_calculator import calculate_yonsei_score
-from services.korea_score_calculator import calculate_korea_score
-from services.sogang_score_calculator import calculate_sogang_score
-from services.data_standard import (
+from services.scoring import (
+    ScoreConverter,
+    calculate_khu_score,
+    calculate_snu_score,
+    calculate_yonsei_score,
+    calculate_korea_score,
+    calculate_sogang_score,
+)
+from services.scoring.data_standard import (
     korean_std_score_table,
     math_std_score_table,
     social_studies_data,
