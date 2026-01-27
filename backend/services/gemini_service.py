@@ -39,13 +39,15 @@ class GeminiService:
             cls._instance = cls()
         return cls._instance
 
-    async def generate(self, prompt: str, system_instruction: str = "") -> str:
+    async def generate(self, prompt: str, system_instruction: str = "", timing_logger=None, agent_name: str = None) -> str:
         """
         Gemini로 텍스트 생성 (Retry 로직 포함)
 
         Args:
             prompt: 프롬프트
             system_instruction: 시스템 지시사항 (선택)
+            timing_logger: 타이밍 로거 (선택)
+            agent_name: Agent 이름 (선택, timing_logger와 함께 사용)
 
         Returns:
             생성된 텍스트
@@ -58,15 +60,25 @@ class GeminiService:
         
         for attempt in range(max_retries):
             try:
+                # 프롬프트 준비
                 full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
+                
+                if timing_logger and agent_name:
+                    timing_logger.mark_agent(agent_name, "llm_prompt_ready")
 
                 # request_options로 retry 비활성화 (직접 제어)
                 request_options = genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
+                
+                if timing_logger and agent_name:
+                    timing_logger.mark_agent(agent_name, "llm_api_sent")
 
                 response = self.model.generate_content(full_prompt, request_options=request_options)
+                
+                if timing_logger and agent_name:
+                    timing_logger.mark_agent(agent_name, "llm_api_received")
 
                 # 토큰 사용량 기록
                 if hasattr(response, 'usage_metadata'):
@@ -102,7 +114,13 @@ class GeminiService:
                     logger.warning(f"Gemini generate: content.parts가 없습니다. finish_reason={finish_reason}")
                     return ""
 
-                return response.text.strip()
+                # 파싱 완료
+                result = response.text.strip()
+                
+                if timing_logger and agent_name:
+                    timing_logger.mark_agent(agent_name, "llm_parsed")
+                
+                return result
                 
             except Exception as e:
                 error_msg = str(e)

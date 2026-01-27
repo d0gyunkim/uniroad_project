@@ -111,55 +111,75 @@ export const sendMessageStream = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal
 ): Promise<void> => {
-  const response = await fetch('/api/chat/stream', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      message,
-      session_id: sessionId,
-    }),
-    signal: abortSignal,
-  })
+  try {
+    const response = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message,
+        session_id: sessionId,
+      }),
+      signal: abortSignal,
+    })
 
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`)
-  }
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('API 에러:', response.status, errorText)
+      onError?.(`서버 오류 (${response.status}): ${errorText}`)
+      return
+    }
 
-  const reader = response.body?.getReader()
-  const decoder = new TextDecoder()
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
 
-  if (!reader) {
-    throw new Error('No reader available')
-  }
+    if (!reader) {
+      console.error('Reader를 사용할 수 없습니다')
+      onError?.('스트림을 읽을 수 없습니다')
+      return
+    }
 
-  let buffer = ''
-  
-  while (true) {
-    const { done, value } = await reader.read()
+    let buffer = ''
     
-    if (done) break
-    
-    buffer += decoder.decode(value, { stream: true })
-    
-    // SSE 메시지 파싱
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-    
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = JSON.parse(line.slice(6))
-        
-        if (data.type === 'log') {
-          onLog(data.message)
-        } else if (data.type === 'result') {
-          onResult(data.data)
-        } else if (data.type === 'error') {
-          onError?.(data.data.response || '오류가 발생했습니다')
+    while (true) {
+      const { done, value } = await reader.read()
+      
+      if (done) break
+      
+      buffer += decoder.decode(value, { stream: true })
+      
+      // SSE 메시지 파싱
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            
+            if (data.type === 'log') {
+              onLog(data.message)
+            } else if (data.type === 'result') {
+              onResult(data.data)
+            } else if (data.type === 'error') {
+              onError?.(data.data.response || '오류가 발생했습니다')
+            }
+          } catch (parseError) {
+            console.error('JSON 파싱 오류:', line, parseError)
+          }
         }
       }
     }
+  } catch (error: any) {
+    // AbortError는 무시
+    if (error?.name === 'AbortError') {
+      console.log('요청이 취소되었습니다')
+      return
+    }
+    
+    console.error('스트리밍 오류:', error)
+    onError?.(error?.message || '네트워크 오류가 발생했습니다')
   }
 }
 

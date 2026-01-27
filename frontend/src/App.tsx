@@ -4,6 +4,7 @@ import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
 import AgentAdminPage from './pages/AgentAdminPage'
 import AuthPage from './pages/AuthPage'
+import TimingDashboard from './pages/TimingDashboard'
 
 // 보호된 라우트 (로그인 필요)
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -76,6 +77,14 @@ function App() {
             element={
               <AdminRoute>
                 <AgentAdminPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/timing-dashboard"
+            element={
+              <AdminRoute>
+                <TimingDashboard />
               </AdminRoute>
             }
           />

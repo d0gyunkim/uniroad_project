@@ -367,7 +367,8 @@ async def run_orchestration_agent_with_prompt(
 
 async def run_orchestration_agent(
     message: str, 
-    history: List[Dict] = None
+    history: List[Dict] = None,
+    timing_logger = None
 ) -> Dict[str, Any]:
     """
     Orchestration Agent 실행 (기본 프롬프트 사용)
@@ -375,6 +376,7 @@ async def run_orchestration_agent(
     Args:
         message: 사용자 질문
         history: 대화 히스토리 (선택)
+        timing_logger: 타이밍 로거 (선택)
         
     Returns:
         {
@@ -383,10 +385,24 @@ async def run_orchestration_agent(
             "answer_structure": List[Dict]
         }
     """
+    import time
+    
+    # 초상세 타이밍: Orchestration Agent 시작
+    orch_timing = None
+    llm_call = None
+    if timing_logger:
+        orch_timing = timing_logger.start_orchestration()
+        llm_call = orch_timing.start_llm_call("orch_main", "gemini-2.5-flash-lite")
     
     system_prompt = ORCHESTRATION_SYSTEM_PROMPT.format(
         agents=format_agents_for_prompt()
     )
+    
+    if timing_logger:
+        timing_logger.mark("orch_prompt_ready")
+    if llm_call:
+        llm_call.mark("prompt_ready")
+        llm_call.set_metadata("prompt_length", len(system_prompt) + len(message))
 
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash-lite",
@@ -408,6 +424,11 @@ async def run_orchestration_agent(
 
     chat_session = model.start_chat(history=gemini_history)
     
+    if timing_logger:
+        timing_logger.mark("orch_api_sent")
+    if llm_call:
+        llm_call.mark("api_request_sent")
+    
     response = chat_session.send_message(
         message, 
         request_options=genai.types.RequestOptions(
@@ -416,10 +437,19 @@ async def run_orchestration_agent(
         )
     )
     
+    if timing_logger:
+        timing_logger.mark("orch_api_received")
+    if llm_call:
+        llm_call.mark("api_response_received")
+        llm_call.set_metadata("response_length", len(response.text))
+    
     # 토큰 사용량 기록
     if hasattr(response, 'usage_metadata'):
         usage = response.usage_metadata
         print(f"💰 토큰 사용량 (orchestration_plan): {usage}")
+        
+        if llm_call:
+            llm_call.set_metadata("token_count", getattr(usage, 'total_token_count', 0))
         
         log_token_usage(
             operation="오케스트레이션_계획",
@@ -430,7 +460,17 @@ async def run_orchestration_agent(
             details="실행계획 수립"
         )
     
+    if llm_call:
+        llm_call.mark("response_parsed")
+    
     result = parse_orchestration_response(response.text)
+    
+    if timing_logger:
+        timing_logger.mark("orch_parsed")
+    if llm_call:
+        llm_call.mark("call_complete")
+    if orch_timing:
+        orch_timing.complete()
     
     # 로그는 호출부(chat.py)에서 출력하므로 여기서는 생략
     

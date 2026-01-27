@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 from utils.token_logger import log_token_usage
+from utils.document_cache import cache_get, cache_set, cache_stats
 
 from services.supabase_client import supabase_service
 from services.gemini_service import gemini_service
@@ -202,8 +203,10 @@ class UniversityAgent(SubAgentBase):
             model_name=model_name
         )
 
-    async def execute(self, query: str) -> Dict[str, Any]:
+    async def execute(self, query: str, timing_logger=None) -> Dict[str, Any]:
         """대학 정보 검색 및 정리"""
+        import time
+        
         _log("")
         _log("="*60)
         _log(f"🏫 {self.name} 실행")
@@ -219,9 +222,24 @@ class UniversityAgent(SubAgentBase):
             _log("")
             _log(f"📋 [1단계] 해시태그 검색: #{self.university_name}")
             
-            metadata_response = client.table('documents_metadata').select('*').execute()
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "db_query_start")
             
-            if not metadata_response.data:
+            # 캐시 확인
+            cached_metadata = cache_get("metadata", university=self.university_name)
+            
+            if cached_metadata:
+                _log(f"   ✅ 캐시 히트: 메타데이터 ({len(cached_metadata)}개 문서)")
+                metadata_response_data = cached_metadata
+            else:
+                _log(f"   🔍 캐시 미스: DB 조회 중...")
+                metadata_response = client.table('documents_metadata').select('*').execute()
+                metadata_response_data = metadata_response.data
+                
+                # 캐시에 저장
+                cache_set("metadata", metadata_response_data, university=self.university_name)
+            
+            if not metadata_response_data:
                 return {
                     "agent": self.name,
                     "status": "no_data",
@@ -251,7 +269,7 @@ class UniversityAgent(SubAgentBase):
 
             # 필터링
             relevant_docs = []
-            for doc in metadata_response.data:
+            for doc in metadata_response_data:
                 doc_hashtags = doc.get('hashtags', []) or []
                 
                 # 필수 조건: 대학 태그 포함
@@ -317,7 +335,9 @@ class UniversityAgent(SubAgentBase):
             try:
                 filter_result = await gemini_service.generate(
                     filter_prompt,
-                    "문서 필터링 전문가"
+                    "문서 필터링 전문가",
+                    timing_logger=timing_logger,
+                    agent_name=self.name
                 )
                 
                 if not filter_result.strip() or "없음" in filter_result.lower():
@@ -356,15 +376,27 @@ class UniversityAgent(SubAgentBase):
                 
                 _log(f"   📄 {title}")
                 
-                # 청크 가져오기
-                chunks_response = client.table('policy_documents')\
-                    .select('id, content, metadata')\
-                    .eq('metadata->>fileName', filename)\
-                    .execute()
+                # 캐시 확인 (파일별)
+                cached_chunks = cache_get("chunks", filename=filename)
                 
-                if chunks_response.data:
+                if cached_chunks:
+                    _log(f"       ✅ 캐시 히트: 청크 데이터 ({len(cached_chunks)}개)")
+                    chunks_data = cached_chunks
+                else:
+                    _log(f"       🔍 캐시 미스: 청크 조회 중...")
+                    # 청크 가져오기
+                    chunks_response = client.table('policy_documents')\
+                        .select('id, content, metadata')\
+                        .eq('metadata->>fileName', filename)\
+                        .execute()
+                    chunks_data = chunks_response.data
+                    
+                    # 캐시에 저장
+                    cache_set("chunks", chunks_data, filename=filename)
+                
+                if chunks_data:
                     sorted_chunks = sorted(
-                        chunks_response.data,
+                        chunks_data,
                         key=lambda x: x.get('metadata', {}).get('chunkIndex', 0)
                     )
                     
@@ -393,13 +425,16 @@ class UniversityAgent(SubAgentBase):
                             "source": title,  # 기존 형식 유지
                             "url": file_url
                         })
+            
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "db_query_complete")
 
             # ============================================================
             # 4단계: 정보 추출
             # ============================================================
             _log("")
             _log(f"📋 [4단계] 정보 추출")
-
+            
             # 사용 가능한 출처 목록 생성
             sources_list = "\n".join([f"- {s}" for s in sources])
 
@@ -424,15 +459,26 @@ class UniversityAgent(SubAgentBase):
             try:
                 extracted_info = await gemini_service.generate(
                     extract_prompt,
-                    "문서 정보 추출 전문가"
+                    "문서 정보 추출 전문가",
+                    timing_logger=timing_logger,
+                    agent_name=self.name
                 )
+                
+                if timing_logger:
+                    timing_logger.mark_agent(self.name, "llm_call_complete")
 
                 # citations는 이미 청크 정보와 함께 추가되었으므로 추가 작업 불필요
 
             except Exception as e:
                 extracted_info = f"정보 추출 실패: {e}"
+                if timing_logger:
+                    timing_logger.mark_agent(self.name, "llm_call_complete")
             
             _log(f"   추출된 정보 길이: {len(extracted_info)}자")
+            
+            # 캐시 통계 로깅
+            stats = cache_stats()
+            _log(f"   📊 캐시 통계: {stats['hits']} 히트 / {stats['misses']} 미스 ({stats['hit_rate']}% 히트율)")
             _log("="*60)
 
             return {
@@ -493,8 +539,10 @@ class ConsultingAgent(SubAgentBase):
             "과학탐구": science_inquiry_data
         }
 
-    async def execute(self, query: str, extracted_scores: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, query: str, extracted_scores: Dict[str, Any] = None, timing_logger=None) -> Dict[str, Any]:
         """성적 기반 합격 가능 대학 분석"""
+        import time
+        
         _log("")
         _log("="*60)
         _log(f"📊 컨설팅 Agent 실행")
@@ -597,9 +645,15 @@ class ConsultingAgent(SubAgentBase):
         _log(f"   질의 분석: {json.dumps(query_analysis, ensure_ascii=False)}")
         
         # Supabase에서 전형결과 문서 조회
+        if timing_logger:
+            timing_logger.mark_agent(self.name, "db_query_start")
+        
         admission_results = await self._fetch_admission_results_from_supabase(
             query_analysis, normalized_scores
         )
+        
+        if timing_logger:
+            timing_logger.mark_agent(self.name, "db_query_complete")
         
         # 평균 백분위 계산 (로그용)
         avg_percentile = self._calculate_average_percentile(normalized_scores)
@@ -707,14 +761,28 @@ class ConsultingAgent(SubAgentBase):
   • 정경대학 경제학과: 최종합격자 평균 518.5점"""
 
         try:
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "llm_call_start")
+            
+            # 프롬프트 준비 완료
+            full_prompt = f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요."
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "llm_prompt_ready")
+                timing_logger.mark_agent(self.name, "llm_api_sent")
+            
             response = self.model.generate_content(
-                f"{system_prompt}\n\n질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
+                full_prompt,
                 generation_config={"temperature": 0.1, "max_output_tokens": 30000},
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
             )
+            
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "llm_api_received")
+                timing_logger.mark_agent(self.name, "llm_parsed")
+                timing_logger.mark_agent(self.name, "llm_call_complete")
 
             # 토큰 사용량 기록
             if hasattr(response, 'usage_metadata'):
@@ -2058,8 +2126,10 @@ class TeacherAgent(SubAgentBase):
             model_name=model_name
         )
 
-    async def execute(self, query: str) -> Dict[str, Any]:
+    async def execute(self, query: str, timing_logger=None) -> Dict[str, Any]:
         """학습 계획 및 조언 제공"""
+        import time
+        
         _log("")
         _log("="*60)
         _log(f"👨‍🏫 선생님 Agent 실행")
@@ -2086,14 +2156,28 @@ class TeacherAgent(SubAgentBase):
 - 존댓말 사용"""
 
         try:
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "llm_call_start")
+            
+            # 프롬프트 준비 완료
+            full_prompt = f"{system_prompt}\n\n학생 질문: {query}\n\n선생님으로서 조언해주세요."
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "llm_prompt_ready")
+                timing_logger.mark_agent(self.name, "llm_api_sent")
+            
             response = self.model.generate_content(
-                f"{system_prompt}\n\n학생 질문: {query}\n\n선생님으로서 조언해주세요.",
+                full_prompt,
                 generation_config={"temperature": 0.7},
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
             )
+            
+            if timing_logger:
+                timing_logger.mark_agent(self.name, "llm_api_received")
+                timing_logger.mark_agent(self.name, "llm_parsed")
+                timing_logger.mark_agent(self.name, "llm_call_complete")
 
             # 토큰 사용량 기록
             if hasattr(response, 'usage_metadata'):
@@ -2161,15 +2245,19 @@ def get_agent(agent_name: str) -> SubAgentBase:
 async def execute_sub_agents(
     execution_plan: list, 
     extracted_scores: Dict[str, Any] = None,
-    user_message: str = None
+    user_message: str = None,
+    timing_logger = None,
+    parallel: bool = True
 ) -> Dict[str, Any]:
     """
-    Execution Plan에 따라 Sub Agent들 실행
+    Execution Plan에 따라 Sub Agent들 실행 (병렬/순차)
     
     Args:
         execution_plan: Orchestration Agent가 생성한 실행 계획
         extracted_scores: Orchestration Agent가 추출한 구조화된 성적 (우선 사용)
         user_message: 사용자의 원본 메시지 (fallback용)
+        timing_logger: 타이밍 로거 (선택)
+        parallel: True면 병렬 실행, False면 순차 실행 (기본: True)
         
     Returns:
         {
@@ -2178,6 +2266,8 @@ async def execute_sub_agents(
             ...
         }
     """
+    import time
+    import asyncio
     results = {}
     
     # extracted_scores 전달 상태 로그
@@ -2187,6 +2277,24 @@ async def execute_sub_agents(
             _log(f"      - {subj}: {info.get('type')} {info.get('value')}")
     else:
         _log("   ℹ️  Orchestration에서 전달받은 성적 없음")
+    
+    if parallel and len(execution_plan) > 1:
+        _log(f"   ⚡ 병렬 실행 모드 ({len(execution_plan)}개 Agent)")
+        return await _execute_agents_parallel(execution_plan, extracted_scores, user_message, timing_logger)
+    else:
+        _log(f"   🔄 순차 실행 모드 ({len(execution_plan)}개 Agent)")
+        return await _execute_agents_sequential(execution_plan, extracted_scores, user_message, timing_logger)
+
+
+async def _execute_agents_sequential(
+    execution_plan: list,
+    extracted_scores: Dict[str, Any] = None,
+    user_message: str = None,
+    timing_logger = None
+) -> Dict[str, Any]:
+    """Sub Agents 순차 실행"""
+    import time
+    results = {}
 
     for step in execution_plan:
         step_num = step.get("step")
@@ -2233,11 +2341,24 @@ async def execute_sub_agents(
         try:
             agent = get_agent(agent_name)
             
+            # 타이밍 측정 시작
+            agent_start_time = time.time()
+            if timing_logger:
+                timing_logger.mark_agent(agent_name, "start", agent_start_time)
+            
             # 컨설팅 agent에는 extracted_scores 전달
             if "컨설팅" in agent_name and extracted_scores:
-                result = await agent.execute(query, extracted_scores=extracted_scores)
+                result = await agent.execute(query, extracted_scores=extracted_scores, timing_logger=timing_logger)
             else:
-                result = await agent.execute(query)
+                result = await agent.execute(query, timing_logger=timing_logger)
+            
+            # 타이밍 측정 완료
+            agent_complete_time = time.time()
+            if timing_logger:
+                timing_logger.mark_agent(agent_name, "complete", agent_complete_time)
+            
+            # 실행 시간 추가
+            result["execution_time"] = agent_complete_time - agent_start_time
             
             results[f"Step{step_num}_Result"] = result
             
@@ -2257,5 +2378,112 @@ async def execute_sub_agents(
                 "source_urls": [],
                 "citations": []
             }
+    
+    return results
 
+
+async def _execute_agents_parallel(
+    execution_plan: list,
+    extracted_scores: Dict[str, Any] = None,
+    user_message: str = None,
+    timing_logger = None
+) -> Dict[str, Any]:
+    """Sub Agents 병렬 실행"""
+    import time
+    import asyncio
+    
+    async def execute_single_agent(step: Dict[str, Any]):
+        """단일 Agent 실행"""
+        step_num = step.get("step")
+        agent_name = step.get("agent")
+        query = step.get("query")
+        
+        _log(f"   Step {step_num}: {agent_name} (병렬 실행)")
+        
+        # 컨설팅 agent 호출 시 성적 전처리
+        if "컨설팅" in agent_name:
+            try:
+                # 1순위: Orchestration이 추출한 extracted_scores 사용
+                if extracted_scores:
+                    from .score_preprocessing import build_preprocessed_query
+                    
+                    _log("   📊 Orchestration 추출 성적으로 전처리 시작...")
+                    preprocessed_query = build_preprocessed_query(extracted_scores, query)
+                    
+                    if preprocessed_query != query:
+                        query = preprocessed_query
+                        _log(f"   ✅ 성적 전처리 완료 - {len(extracted_scores)}개 과목 정규화")
+                    else:
+                        _log("   ℹ️  성적 정보 없음 - 원본 쿼리 사용")
+                
+                # 2순위 (fallback): 정규식 기반 전처리
+                elif user_message:
+                    from .score_preprocessing import preprocess_scores_for_query
+                    
+                    _log("   📊 정규식 기반 성적 전처리 시작 (fallback)...")
+                    preprocessed_query = preprocess_scores_for_query(user_message, query)
+                    
+                    if preprocessed_query != query:
+                        query = preprocessed_query
+                        _log("   ✅ 성적 전처리 완료 (fallback)")
+                    else:
+                        _log("   ℹ️  성적 정보 없음 - 원본 쿼리 사용")
+                        
+            except Exception as e:
+                _log(f"   ⚠️  성적 전처리 실패: {e}")
+                # 실패해도 원본 쿼리로 계속 진행
+        
+        _log(f"   Query: {query[:150]}..." if len(query) > 150 else f"   Query: {query}")
+        
+        try:
+            agent = get_agent(agent_name)
+            
+            # 타이밍 측정 시작
+            agent_start_time = time.time()
+            if timing_logger:
+                timing_logger.mark_agent(agent_name, "start", agent_start_time)
+            
+            # 컨설팅 agent에는 extracted_scores 전달
+            if "컨설팅" in agent_name and extracted_scores:
+                result = await agent.execute(query, extracted_scores=extracted_scores, timing_logger=timing_logger)
+            else:
+                result = await agent.execute(query, timing_logger=timing_logger)
+            
+            # 타이밍 측정 완료
+            agent_complete_time = time.time()
+            if timing_logger:
+                timing_logger.mark_agent(agent_name, "complete", agent_complete_time)
+            
+            # 실행 시간 추가
+            result["execution_time"] = agent_complete_time - agent_start_time
+            
+            status_icon = "✅" if result.get('status') == 'success' else "❌"
+            _log(f"   {status_icon} Status: {result.get('status')}")
+            sources_count = len(result.get('sources', []))
+            if sources_count > 0:
+                _log(f"   출처: {sources_count}개")
+            
+            return (step_num, result)
+            
+        except Exception as e:
+            _log(f"   ❌ Error: {e}")
+            return (step_num, {
+                "agent": agent_name,
+                "status": "error",
+                "result": str(e),
+                "sources": [],
+                "source_urls": [],
+                "citations": [],
+                "execution_time": 0
+            })
+    
+    # 모든 Agent를 병렬로 실행
+    tasks = [execute_single_agent(step) for step in execution_plan]
+    agent_results = await asyncio.gather(*tasks)
+    
+    # 결과를 Step별로 정리
+    results = {}
+    for step_num, result in agent_results:
+        results[f"Step{step_num}_Result"] = result
+    
     return results

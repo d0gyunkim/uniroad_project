@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Testing Framework</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 헤더 */
+        .header {
+            background: #0f3460;
+            border-bottom: 3px solid #4ecca3;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 56px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .logo {
+            color: #4ecca3;
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* 에이전트 탭 */
+        .agent-tabs {
+            display: flex;
+            gap: 0;
+        }
+
+        .agent-tab {
+            padding: 16px 20px;
+            background: transparent;
+            border: none;
+            color: #888;
+            font-size: 13px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -3px;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .agent-tab:hover {
+            color: #ccc;
+            background: rgba(78, 204, 163, 0.08);
+        }
+
+        .agent-tab.active {
+            color: #4ecca3;
+            border-bottom-color: #4ecca3;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .server-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #666;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #333;
+        }
+
+        .status-dot.active {
+            background: #4ecca3;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* 메인 컨테이너 */
+        .main-container {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            height: calc(100vh - 56px);
+        }
+
+        /* 왼쪽 설정 패널 */
+        .config-panel {
+            background: #16213e;
+            border-right: 1px solid #333;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* 섹션 카드 */
+        .section-card {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+            background: rgba(78, 204, 163, 0.05);
+            border-bottom: 1px solid #2a2a4a;
+            cursor: pointer;
+        }
+
+        .section-header:hover {
+            background: rgba(78, 204, 163, 0.08);
+        }
+
+        .section-title {
+            color: #4ecca3;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title .icon {
+            font-size: 14px;
+        }
+
+        .section-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .section-body {
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .section-body.collapsed {
+            display: none;
+        }
+
+        /* 입력 그룹 */
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .input-group label {
+            color: #888;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .input-group textarea,
+        .input-group input,
+        .input-group select {
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #eee;
+            font-size: 12px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        .input-group textarea {
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            resize: vertical;
+            min-height: 80px;
+            line-height: 1.5;
+        }
+
+        .input-group textarea.large {
+            min-height: 140px;
+        }
+
+        .input-group textarea:focus,
+        .input-group input:focus,
+        .input-group select:focus {
+            outline: none;
+            border-color: #4ecca3;
+        }
+
+        /* 가로 그리드 */
+        .input-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        /* 버튼 스타일 */
+        .btn {
+            border: none;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 10px;
+        }
+
+        .btn-primary {
+            background: #4ecca3;
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            background: #3bb892;
+        }
+
+        .btn-secondary {
+            background: #2a2a4a;
+            color: #aaa;
+            border: 1px solid #333;
+        }
+
+        .btn-secondary:hover {
+            background: #3a3a5a;
+            color: #eee;
+        }
+
+        .btn-danger {
+            background: transparent;
+            color: #e94560;
+            border: 1px solid #e94560;
+        }
+
+        .btn-danger:hover {
+            background: #e94560;
+            color: white;
+        }
+
+        /* 실행 버튼 */
+        .run-section {
+            margin-top: auto;
+            padding-top: 12px;
+            border-top: 1px solid #2a2a4a;
+        }
+
+        .btn-run {
+            width: 100%;
+            background: linear-gradient(135deg, #4ecca3 0%, #3bb892 100%);
+            color: #1a1a2e;
+            border: none;
+            padding: 14px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-run:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(78, 204, 163, 0.3);
+        }
+
+        .btn-run:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .run-config {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .run-config label {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .run-config input {
+            width: 60px;
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: #eee;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        /* 오른쪽 결과 패널 */
+        .result-panel {
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .result-header {
+            background: #16213e;
+            border-bottom: 1px solid #333;
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .result-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #eee;
+        }
+
+        .result-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .result-stats .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .result-stats .stat-value {
+            color: #4ecca3;
+            font-weight: 600;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* 결과 탭 */
+        .result-tabs {
+            display: flex;
+            background: #16213e;
+            border-bottom: 1px solid #333;
+            padding: 0 20px;
+        }
+
+        .result-tab {
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            color: #666;
+            font-size: 12px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .result-tab:hover {
+            color: #aaa;
+        }
+
+        .result-tab.active {
+            color: #4ecca3;
+            border-bottom-color: #4ecca3;
+        }
+
+        /* 결과 콘텐츠 */
+        .result-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* 결과 테이블 */
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .result-table th {
+            background: #0f3460;
+            color: #4ecca3;
+            font-weight: 600;
+            padding: 12px 14px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .result-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #2a2a4a;
+            color: #ccc;
+        }
+
+        .result-table tr:hover td {
+            background: rgba(78, 204, 163, 0.05);
+        }
+
+        .result-table .status-success {
+            color: #4ecca3;
+        }
+
+        .result-table .status-error {
+            color: #e94560;
+        }
+
+        .result-table .time-cell {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 11px;
+        }
+
+        .result-table .output-preview {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #888;
+            cursor: pointer;
+        }
+
+        .result-table .output-preview:hover {
+            color: #4ecca3;
+        }
+
+        /* 빈 상태 */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            color: #555;
+            text-align: center;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .empty-state h3 {
+            font-size: 16px;
+            color: #777;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 13px;
+            color: #555;
+        }
+
+        /* 통계 카드 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .stat-card .label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 6px;
+        }
+
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #4ecca3;
+        }
+
+        .stat-card .value.error {
+            color: #e94560;
+        }
+
+        .stat-card .unit {
+            font-size: 12px;
+            color: #666;
+            margin-left: 4px;
+        }
+
+        /* 모달 */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 24px;
+            width: 500px;
+            max-width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            color: #4ecca3;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .modal-close:hover {
+            color: #e94560;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        /* 저장 목록 */
+        .saved-list {
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .saved-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+            border-bottom: 1px solid #2a2a4a;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .saved-item:last-child {
+            border-bottom: none;
+        }
+
+        .saved-item:hover {
+            background: rgba(78, 204, 163, 0.1);
+        }
+
+        .saved-item .info {
+            flex: 1;
+        }
+
+        .saved-item .name {
+            font-size: 13px;
+            color: #eee;
+            margin-bottom: 2px;
+        }
+
+        .saved-item .meta {
+            font-size: 10px;
+            color: #666;
+        }
+
+        .saved-item .delete-btn {
+            color: #666;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 16px;
+            opacity: 0;
+            transition: all 0.2s;
+        }
+
+        .saved-item:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .saved-item .delete-btn:hover {
+            color: #e94560;
+        }
+
+        /* 프로그레스 바 */
+        .progress-bar {
+            height: 4px;
+            background: #2a2a4a;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ecca3, #3bb892);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* 배지 */
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 9px;
+            font-weight: 600;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+
+        .badge-required {
+            background: #e94560;
+            color: white;
+        }
+
+        .badge-optional {
+            background: #333;
+            color: #888;
+        }
+
+        /* 토글 아이콘 */
+        .toggle-icon {
+            color: #666;
+            font-size: 10px;
+            transition: transform 0.2s;
+        }
+
+        .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        /* 스크롤바 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+    </style>
+</head>
+<body>
+    <!-- 헤더 -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                Agent Testing Framework
+            </div>
+            <nav class="agent-tabs">
+                <button class="agent-tab active" data-agent="orchestration">Orchestration</button>
+                <button class="agent-tab" data-agent="sub">Sub Agent</button>
+                <button class="agent-tab" data-agent="final">Final Agent</button>
+                <button class="agent-tab" data-agent="pipeline">Pipeline</button>
+            </nav>
+        </div>
+        <div class="header-right">
+            <div class="server-status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">서버 확인 중...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 메인 -->
+    <main class="main-container">
+        <!-- 왼쪽: 설정 패널 -->
+        <aside class="config-panel">
+            <!-- 데이터셋 섹션 -->
+            <div class="section-card">
+                <div class="section-header" onclick="toggleSection('datasetSection')">
+                    <span class="section-title">
+                        <span class="icon">📁</span>
+                        테스트 데이터셋
+                        <span class="badge badge-required">필수</span>
+                    </span>
+                    <span class="toggle-icon" id="datasetSectionIcon">▼</span>
+                </div>
+                <div class="section-body" id="datasetSection">
+                    <div class="section-actions" style="margin-bottom: 8px;">
+                        <button class="btn btn-secondary btn-sm" onclick="openLoadDatasetModal()">불러오기</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openSaveDatasetModal()">저장</button>
+                        <button class="btn btn-secondary btn-sm" onclick="loadExample()">예시</button>
+                        <button class="btn btn-danger btn-sm" onclick="clearDataset()">초기화</button>
+                    </div>
+                    
+                    <!-- Orchestration 입력 (동적으로 변경됨) -->
+                    <div id="orchestrationInputs">
+                        <div class="input-group">
+                            <label>사용자 질문</label>
+                            <textarea id="userQuestion" placeholder="테스트할 사용자 질문을 입력하세요"></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label>이전 대화 맥락 (JSON 배열)</label>
+                            <textarea id="conversationHistory" placeholder='[{"role": "user", "content": "..."}, ...]'></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Sub Agent 입력 -->
+                    <div id="subAgentInputs" style="display: none;">
+                        <div class="input-group">
+                            <label>실행 계획 (Execution Plan JSON)</label>
+                            <textarea id="executionPlan" class="large" placeholder='[{"step": 1, "agent": "서울대 agent", "query": "..."}]'></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label>추출된 성적 (Extracted Scores JSON)</label>
+                            <textarea id="extractedScores" placeholder='{"국어": {"type": "등급", "value": 1}, ...}'></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Final Agent 입력 -->
+                    <div id="finalAgentInputs" style="display: none;">
+                        <div class="input-group">
+                            <label>사용자 질문 + 맥락</label>
+                            <textarea id="userQuestionWithContext" placeholder="사용자 질문과 이전 대화 맥락"></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label>Answer Structure</label>
+                            <textarea id="answerStructure" class="large" placeholder="Orchestration에서 생성된 답변 구조"></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label>Sub Agent 결과</label>
+                            <textarea id="subAgentResults" class="large" placeholder="각 Sub Agent의 실행 결과"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Pipeline 입력 -->
+                    <div id="pipelineInputs" style="display: none;">
+                        <div class="input-group">
+                            <label>사용자 질문</label>
+                            <textarea id="pipelineQuestion" placeholder="전체 파이프라인 테스트용 질문"></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label>이전 대화 맥락 (JSON 배열)</label>
+                            <textarea id="pipelineHistory" placeholder='[{"role": "user", "content": "..."}, ...]'></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 프롬프트 섹션 -->
+            <div class="section-card">
+                <div class="section-header" onclick="toggleSection('promptSection')">
+                    <span class="section-title">
+                        <span class="icon">📝</span>
+                        프롬프트 설정
+                        <span class="badge badge-optional">선택</span>
+                    </span>
+                    <span class="toggle-icon collapsed" id="promptSectionIcon">▼</span>
+                </div>
+                <div class="section-body collapsed" id="promptSection">
+                    <div class="section-actions" style="margin-bottom: 8px;">
+                        <button class="btn btn-secondary btn-sm" onclick="loadDefaultPrompt()">기본값</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openLoadPromptModal()">불러오기</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openSavePromptModal()">저장</button>
+                    </div>
+                    <div class="input-group">
+                        <label>프롬프트 버전</label>
+                        <select id="promptVersion">
+                            <option value="default">기본 프롬프트 (Production)</option>
+                            <option value="custom">커스텀 프롬프트</option>
+                        </select>
+                    </div>
+                    <div class="input-group" id="customPromptGroup" style="display: none;">
+                        <label>커스텀 프롬프트</label>
+                        <textarea id="customPrompt" class="large" placeholder="커스텀 프롬프트를 입력하세요...
+
+플레이스홀더:
+{user_question} - 사용자 질문
+{history} - 대화 맥락
+{execution_plan} - 실행 계획
+..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 실행 설정 -->
+            <div class="run-section">
+                <div class="run-config">
+                    <label>반복 횟수:</label>
+                    <input type="number" id="iterations" value="10" min="1" max="100">
+                    <label style="margin-left: auto;">
+                        <input type="checkbox" id="parallelExecution" checked> 병렬 실행
+                    </label>
+                </div>
+                <div class="progress-bar" id="progressBar" style="display: none;">
+                    <div class="fill" id="progressFill"></div>
+                </div>
+                <button class="btn-run" id="runBtn" onclick="runTest()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                    테스트 실행
+                </button>
+            </div>
+        </aside>
+
+        <!-- 오른쪽: 결과 패널 -->
+        <section class="result-panel">
+            <div class="result-header">
+                <div>
+                    <div class="result-title">테스트 결과</div>
+                    <div class="result-stats" id="resultStats" style="display: none;">
+                        <span class="stat">실행: <span class="stat-value" id="statRuns">0</span>회</span>
+                        <span class="stat">성공: <span class="stat-value" id="statSuccess">0</span>회</span>
+                        <span class="stat">평균: <span class="stat-value" id="statAvgTime">0</span>ms</span>
+                    </div>
+                </div>
+                <div class="result-actions">
+                    <button class="btn btn-secondary" onclick="exportExcel()" id="exportBtn" disabled>
+                        Excel 다운로드
+                    </button>
+                </div>
+            </div>
+
+            <div class="result-tabs">
+                <button class="result-tab active" data-tab="table">결과 테이블</button>
+                <button class="result-tab" data-tab="stats">통계</button>
+                <button class="result-tab" data-tab="detail">상세 보기</button>
+            </div>
+
+            <div class="result-content">
+                <!-- 결과 테이블 탭 -->
+                <div class="tab-panel active" id="tab-table">
+                    <div class="empty-state" id="emptyState">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                        </svg>
+                        <h3>테스트 결과가 없습니다</h3>
+                        <p>왼쪽에서 데이터셋을 설정하고<br>"테스트 실행" 버튼을 클릭하세요</p>
+                    </div>
+                    <table class="result-table" id="resultTable" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>Run</th>
+                                <th>Agent</th>
+                                <th>Status</th>
+                                <th>Time</th>
+                                <th>Output Preview</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 통계 탭 -->
+                <div class="tab-panel" id="tab-stats">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="label">총 실행</div>
+                            <div class="value" id="totalRuns">0<span class="unit">회</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">성공률</div>
+                            <div class="value" id="successRate">0<span class="unit">%</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">평균 시간</div>
+                            <div class="value" id="avgTime">0<span class="unit">ms</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">최대 시간</div>
+                            <div class="value" id="maxTime">0<span class="unit">ms</span></div>
+                        </div>
+                    </div>
+                    <div id="timeChart" style="height: 300px; background: #16213e; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #555;">
+                        실행 후 시간 분포 차트가 표시됩니다
+                    </div>
+                </div>
+
+                <!-- 상세 보기 탭 -->
+                <div class="tab-panel" id="tab-detail">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                        </svg>
+                        <h3>결과를 선택하세요</h3>
+                        <p>결과 테이블에서 행을 클릭하면<br>상세 내용이 표시됩니다</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 데이터셋 불러오기 모달 -->
+    <div class="modal-overlay" id="loadDatasetModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">저장된 데이터셋</span>
+                <button class="modal-close" onclick="closeModal('loadDatasetModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="saved-list" id="datasetList">
+                    <div style="padding: 40px; text-align: center; color: #555;">저장된 데이터셋이 없습니다</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 데이터셋 저장 모달 -->
+    <div class="modal-overlay" id="saveDatasetModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">데이터셋 저장</span>
+                <button class="modal-close" onclick="closeModal('saveDatasetModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>이름</label>
+                    <input type="text" id="datasetName" placeholder="예: 서울대_정시_질문">
+                </div>
+                <div class="input-group" style="margin-top: 12px;">
+                    <label>설명 (선택)</label>
+                    <input type="text" id="datasetDesc" placeholder="간단한 설명">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('saveDatasetModal')">취소</button>
+                <button class="btn btn-primary" onclick="saveDataset()">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 프롬프트 불러오기 모달 -->
+    <div class="modal-overlay" id="loadPromptModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">저장된 프롬프트</span>
+                <button class="modal-close" onclick="closeModal('loadPromptModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="saved-list" id="promptList">
+                    <div style="padding: 40px; text-align: center; color: #555;">저장된 프롬프트가 없습니다</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 프롬프트 저장 모달 -->
+    <div class="modal-overlay" id="savePromptModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">프롬프트 저장</span>
+                <button class="modal-close" onclick="closeModal('savePromptModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>이름</label>
+                    <input type="text" id="promptName" placeholder="예: v2_간결한버전">
+                </div>
+                <div class="input-group" style="margin-top: 12px;">
+                    <label>설명 (선택)</label>
+                    <input type="text" id="promptDesc" placeholder="간단한 설명">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('savePromptModal')">취소</button>
+                <button class="btn btn-primary" onclick="savePrompt()">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 상세 보기 모달 -->
+    <div class="modal-overlay" id="detailModal">
+        <div class="modal" style="width: 800px;">
+            <div class="modal-header">
+                <span class="modal-title">실행 결과 상세</span>
+                <button class="modal-close" onclick="closeModal('detailModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="detailContent">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // 상태 관리
+        // ============================================
+        const API_BASE = 'http://localhost:8095';
+        let currentAgent = 'orchestration';
+        let testResults = [];
+
+        // ============================================
+        // 초기화
+        // ============================================
+        document.addEventListener('DOMContentLoaded', () => {
+            initTabs();
+            initResultTabs();
+            initPromptVersionToggle();
+            checkServerStatus();
+        });
+
+        // ============================================
+        // 탭 전환
+        // ============================================
+        function initTabs() {
+            document.querySelectorAll('.agent-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const agent = tab.dataset.agent;
+                    switchAgent(agent);
+                });
+            });
+        }
+
+        function switchAgent(agent) {
+            currentAgent = agent;
+            
+            // 탭 활성화
+            document.querySelectorAll('.agent-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`[data-agent="${agent}"]`).classList.add('active');
+            
+            // 입력 폼 전환
+            document.querySelectorAll('[id$="Inputs"]').forEach(el => el.style.display = 'none');
+            
+            switch(agent) {
+                case 'orchestration':
+                    document.getElementById('orchestrationInputs').style.display = 'block';
+                    break;
+                case 'sub':
+                    document.getElementById('subAgentInputs').style.display = 'block';
+                    break;
+                case 'final':
+                    document.getElementById('finalAgentInputs').style.display = 'block';
+                    break;
+                case 'pipeline':
+                    document.getElementById('pipelineInputs').style.display = 'block';
+                    break;
+            }
+        }
+
+        function initResultTabs() {
+            document.querySelectorAll('.result-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabName = tab.dataset.tab;
+                    document.querySelectorAll('.result-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById(`tab-${tabName}`).classList.add('active');
+                });
+            });
+        }
+
+        // ============================================
+        // 섹션 토글
+        // ============================================
+        function toggleSection(sectionId) {
+            const body = document.getElementById(sectionId);
+            const icon = document.getElementById(sectionId + 'Icon');
+            body.classList.toggle('collapsed');
+            icon.classList.toggle('collapsed');
+        }
+
+        // ============================================
+        // 프롬프트 버전 토글
+        // ============================================
+        function initPromptVersionToggle() {
+            const select = document.getElementById('promptVersion');
+            const customGroup = document.getElementById('customPromptGroup');
+            
+            select.addEventListener('change', () => {
+                customGroup.style.display = select.value === 'custom' ? 'block' : 'none';
+            });
+        }
+
+        // ============================================
+        // 서버 상태 확인
+        // ============================================
+        async function checkServerStatus() {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                if (res.ok) {
+                    dot.classList.add('active');
+                    text.textContent = '서버 연결됨';
+                } else {
+                    throw new Error('Server error');
+                }
+            } catch (e) {
+                dot.classList.remove('active');
+                text.textContent = '서버 오프라인';
+            }
+        }
+
+        // ============================================
+        // 모달
+        // ============================================
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function openLoadDatasetModal() {
+            openModal('loadDatasetModal');
+            // TODO: 데이터셋 목록 로드
+        }
+
+        function openSaveDatasetModal() {
+            openModal('saveDatasetModal');
+        }
+
+        function openLoadPromptModal() {
+            openModal('loadPromptModal');
+            // TODO: 프롬프트 목록 로드
+        }
+
+        function openSavePromptModal() {
+            openModal('savePromptModal');
+        }
+
+        // ============================================
+        // 데이터셋 관리
+        // ============================================
+        function loadExample() {
+            // 현재 에이전트에 맞는 예시 로드
+            switch(currentAgent) {
+                case 'orchestration':
+                    document.getElementById('userQuestion').value = '서울대 정시 모집요강 알려줘';
+                    document.getElementById('conversationHistory').value = '[]';
+                    break;
+                case 'sub':
+                    document.getElementById('executionPlan').value = JSON.stringify([
+                        {"step": 1, "agent": "서울대 agent", "query": "2026학년도 정시 모집요강"}
+                    ], null, 2);
+                    document.getElementById('extractedScores').value = '{}';
+                    break;
+                case 'final':
+                    document.getElementById('userQuestionWithContext').value = '서울대 정시 모집요강 알려줘';
+                    document.getElementById('answerStructure').value = '**섹션 1** [fact_check]\n- 타이틀: 【서울대 정시 모집】\n- 지시사항: 핵심 정보 정리';
+                    document.getElementById('subAgentResults').value = '### Step1_Result (서울대 agent)\n상태: success\n\n2026학년도 정시 모집 정보...';
+                    break;
+                case 'pipeline':
+                    document.getElementById('pipelineQuestion').value = '서울대 정시 모집요강 알려줘';
+                    document.getElementById('pipelineHistory').value = '[]';
+                    break;
+            }
+        }
+
+        function clearDataset() {
+            document.querySelectorAll('.section-body textarea').forEach(el => el.value = '');
+        }
+
+        function saveDataset() {
+            const name = document.getElementById('datasetName').value.trim();
+            if (!name) {
+                alert('이름을 입력하세요.');
+                return;
+            }
+            // TODO: API 호출
+            alert('저장 완료! (API 연동 필요)');
+            closeModal('saveDatasetModal');
+        }
+
+        // ============================================
+        // 프롬프트 관리
+        // ============================================
+        function loadDefaultPrompt() {
+            // TODO: 기본 프롬프트 로드
+            alert('기본 프롬프트 로드 (API 연동 필요)');
+        }
+
+        function savePrompt() {
+            const name = document.getElementById('promptName').value.trim();
+            if (!name) {
+                alert('이름을 입력하세요.');
+                return;
+            }
+            // TODO: API 호출
+            alert('저장 완료! (API 연동 필요)');
+            closeModal('savePromptModal');
+        }
+
+        // ============================================
+        // 테스트 실행
+        // ============================================
+        async function runTest() {
+            const btn = document.getElementById('runBtn');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            const iterations = parseInt(document.getElementById('iterations').value) || 10;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="spin"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg> 실행 중...';
+            progressBar.style.display = 'block';
+            progressFill.style.width = '0%';
+
+            // 테스트 시뮬레이션 (TODO: 실제 API 호출로 대체)
+            testResults = [];
+            
+            for (let i = 0; i < iterations; i++) {
+                await new Promise(r => setTimeout(r, 200));
+                progressFill.style.width = `${((i + 1) / iterations) * 100}%`;
+                
+                // 시뮬레이션 결과
+                testResults.push({
+                    runId: i + 1,
+                    agent: currentAgent,
+                    status: Math.random() > 0.1 ? 'success' : 'error',
+                    time: Math.floor(Math.random() * 2000) + 500,
+                    output: '테스트 결과 출력...',
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // 결과 렌더링
+            renderResults();
+            updateStats();
+
+            btn.disabled = false;
+            btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 테스트 실행';
+            progressBar.style.display = 'none';
+            document.getElementById('exportBtn').disabled = false;
+        }
+
+        // ============================================
+        // 결과 렌더링
+        // ============================================
+        function renderResults() {
+            const emptyState = document.getElementById('emptyState');
+            const table = document.getElementById('resultTable');
+            const tbody = document.getElementById('resultTableBody');
+            
+            emptyState.style.display = 'none';
+            table.style.display = 'table';
+            document.getElementById('resultStats').style.display = 'flex';
+            
+            tbody.innerHTML = testResults.map(r => `
+                <tr onclick="showDetail(${r.runId - 1})">
+                    <td>#${r.runId}</td>
+                    <td>${r.agent}</td>
+                    <td class="status-${r.status}">${r.status === 'success' ? '✓ 성공' : '✗ 실패'}</td>
+                    <td class="time-cell">${r.time.toLocaleString()}ms</td>
+                    <td class="output-preview">${escapeHtml(r.output.substring(0, 50))}...</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateStats() {
+            const successCount = testResults.filter(r => r.status === 'success').length;
+            const avgTime = Math.round(testResults.reduce((sum, r) => sum + r.time, 0) / testResults.length);
+            const maxTime = Math.max(...testResults.map(r => r.time));
+            
+            document.getElementById('statRuns').textContent = testResults.length;
+            document.getElementById('statSuccess').textContent = successCount;
+            document.getElementById('statAvgTime').textContent = avgTime.toLocaleString();
+            
+            document.getElementById('totalRuns').innerHTML = `${testResults.length}<span class="unit">회</span>`;
+            document.getElementById('successRate').innerHTML = `${Math.round(successCount / testResults.length * 100)}<span class="unit">%</span>`;
+            document.getElementById('avgTime').innerHTML = `${avgTime.toLocaleString()}<span class="unit">ms</span>`;
+            document.getElementById('maxTime').innerHTML = `${maxTime.toLocaleString()}<span class="unit">ms</span>`;
+        }
+
+        function showDetail(index) {
+            const result = testResults[index];
+            const content = document.getElementById('detailContent');
+            
+            content.innerHTML = `
+                <div style="background: #0f0f23; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 12px; color: #eee; white-space: pre-wrap;">
+Run ID: #${result.runId}
+Agent: ${result.agent}
+Status: ${result.status}
+Time: ${result.time}ms
+Timestamp: ${result.timestamp}
+
+--- Output ---
+${escapeHtml(result.output)}
+                </div>
+            `;
+            
+            openModal('detailModal');
+        }
+
+        // ============================================
+        // Excel 내보내기
+        // ============================================
+        function exportExcel() {
+            // TODO: 실제 Excel 다운로드 구현
+            alert('Excel 다운로드 (API 연동 필요)');
+        }
+
+        // ============================================
+        // 유틸리티
+        // ============================================
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 주기적으로 서버 상태 확인
+        setInterval(checkServerStatus, 30000);
+    </script>
+
+    <style>
+        .spin {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</body>
+</html>

@@ -8,9 +8,9 @@ from typing import Dict, Any
 
 # ScoreConverter import
 try:
-    from backend.services.score_converter import ScoreConverter
+    from services.scoring import ScoreConverter
 except ModuleNotFoundError:
-    from score_converter import ScoreConverter
+    from backend.services.scoring.score_converter import ScoreConverter
 
 
 def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[str, Any]:

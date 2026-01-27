@@ -153,7 +153,8 @@ class FinalAgent:
         answer_structure: List[Dict],
         sub_agent_results: Dict[str, Any],
         custom_prompt: str = None,
-        history: List[Dict] = None
+        history: List[Dict] = None,
+        timing_logger = None
     ) -> Dict[str, Any]:
         """
         Answer Structure에 따라 최종 답변 생성
@@ -164,6 +165,7 @@ class FinalAgent:
             sub_agent_results: Sub Agent들의 실행 결과
             custom_prompt: 커스텀 프롬프트 (선택)
             history: 대화 히스토리 (최근 10개 대화)
+            timing_logger: 타이밍 로거 (선택)
 
         Returns:
             {
@@ -174,6 +176,14 @@ class FinalAgent:
                 "metadata": Dict
             }
         """
+        import time
+        
+        # 초상세 타이밍: Final Agent 시작
+        final_timing = None
+        llm_call = None
+        if timing_logger:
+            final_timing = timing_logger.start_final_agent()
+        
         _log("")
         _log("="*80)
         _log("📝 Final Agent 실행")
@@ -181,6 +191,9 @@ class FinalAgent:
         
         # history를 user_question에 병합
         user_question_with_context = self._merge_history_with_question(user_question, history)
+        
+        if timing_logger:
+            timing_logger.mark("final_history_merged")
         
         # 입력 데이터 검증 로그
         _log(f"🔍 [입력 검증]")
@@ -192,9 +205,15 @@ class FinalAgent:
 
         # Sub Agent 결과 정리 + 출처 정보 수집
         results_text, all_sources, all_source_urls, all_citations, all_chunks = self._format_sub_agent_results(sub_agent_results)
+        
+        if timing_logger:
+            timing_logger.mark("final_results_formatted")
 
         # Answer Structure를 텍스트로 변환
         structure_text = self._format_answer_structure(answer_structure)
+        
+        if timing_logger:
+            timing_logger.mark("final_structure_formatted")
 
         
         # 🔍 테스트 환경용 복사 가능한 데이터 출력
@@ -221,6 +240,9 @@ class FinalAgent:
         _log(f"\n--- 4. all_citations (JSON) ---")
         _log(_json.dumps(all_citations, ensure_ascii=False, indent=2))
         _log("=" * 80)
+        
+        if timing_logger:
+            timing_logger.mark("final_prompt_ready")
 
         # 프롬프트 가져오기
         if custom_prompt:
@@ -242,8 +264,22 @@ class FinalAgent:
             )
         
         _log(f"   최종 프롬프트 길이: {len(prompt)}자")
+        
+        if timing_logger:
+            timing_logger.mark("final_prompt_ready")
 
         try:
+            # 초상세 타이밍: LLM 호출 시작
+            if final_timing:
+                llm_call = final_timing.start_llm_call("final_main", "gemini-2.5-flash-lite")
+                llm_call.mark("prompt_ready")
+                llm_call.set_metadata("prompt_length", len(prompt))
+            
+            if timing_logger:
+                timing_logger.mark("final_api_sent")
+            if llm_call:
+                llm_call.mark("api_request_sent")
+            
             response = self.model.generate_content(
                 prompt,
                 generation_config={
@@ -255,11 +291,20 @@ class FinalAgent:
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
             )
+            
+            if timing_logger:
+                timing_logger.mark("final_api_received")
+            if llm_call:
+                llm_call.mark("api_response_received")
+                llm_call.set_metadata("response_length", len(response.text))
 
             # 토큰 사용량 기록
             if hasattr(response, 'usage_metadata'):
                 usage = response.usage_metadata
                 print(f"💰 토큰 사용량 (final_agent): {usage}")
+                
+                if llm_call:
+                    llm_call.set_metadata("token_count", getattr(usage, 'total_token_count', 0))
                 
                 log_token_usage(
                     operation="최종답변생성",
@@ -272,7 +317,15 @@ class FinalAgent:
 
             # 후처리: 섹션 마커 제거 및 cite 태그 정리
             raw_answer = response.text
+            if llm_call:
+                llm_call.mark("response_parsed")
+            
             final_answer = self._post_process_sections(raw_answer)
+            
+            if timing_logger:
+                timing_logger.mark("final_parsed")
+            if llm_call:
+                llm_call.mark("call_complete")
 
             # ⚠️ 환산점수가 포함된 응답이면 무조건 "수능 점수 변환 및 추정 방법" cite 태그 추가
             SCORE_GUIDE_URL = os.getenv(
@@ -289,11 +342,18 @@ class FinalAgent:
             used_chunks = []
             if all_chunks:
                 used_chunks = self._extract_cited_chunks_only(final_answer, all_chunks)
+            
+            if timing_logger:
+                timing_logger.mark("final_postprocessed")
 
             _log(f"   원본 답변 길이: {len(raw_answer)}자")
             _log(f"   후처리 답변 길이: {len(final_answer)}자")
             _log(f"   실제 인용된 청크 수: {len(used_chunks)}개 (중복 제거됨)")
             _log("="*80)
+
+            # 초상세 타이밍: Final Agent 완료
+            if final_timing:
+                final_timing.complete()
 
             return {
                 "status": "success",
@@ -703,12 +763,14 @@ async def generate_final_answer(
     user_question: str,
     answer_structure: List[Dict],
     sub_agent_results: Dict[str, Any],
-    history: List[Dict] = None
+    history: List[Dict] = None,
+    timing_logger = None
 ) -> Dict[str, Any]:
     """Final Agent를 통해 최종 답변 생성"""
     return await final_agent.generate_final_answer(
         user_question=user_question,
         answer_structure=answer_structure,
         sub_agent_results=sub_agent_results,
-        history=history
+        history=history,
+        timing_logger=timing_logger
     )

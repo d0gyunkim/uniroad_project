@@ -7,6 +7,7 @@ import AgentPanel from '../components/AgentPanel'
 import AuthModal from '../components/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
+import { FrontendTimingLogger } from '../utils/timingLogger'
 
 interface UsedChunk {
   id: string
@@ -315,6 +316,8 @@ export default function ChatPage() {
 
   // 세션 선택 시 메시지 불러오기
   const prevSessionIdRef = useRef<string | null>(null)
+  const isStreamingRef = useRef(false) // 스트리밍 중인지 추적
+  
   useEffect(() => {
     // 세션이 변경되었을 때
     if (currentSessionId !== prevSessionIdRef.current) {
@@ -333,8 +336,9 @@ export default function ChatPage() {
   }, [currentSessionId, isAuthenticated])
   
   // savedMessages가 업데이트되면 현재 세션의 메시지로 변환
+  // 단, 스트리밍 중이 아닐 때만 (로컬 메시지를 보호)
   useEffect(() => {
-    if (currentSessionId && savedMessages.length >= 0) {
+    if (currentSessionId && savedMessages.length >= 0 && !isStreamingRef.current) {
       // savedMessages가 현재 세션의 메시지인지 확인 (loadMessages가 올바른 세션 ID로 호출되었으므로)
       const convertedMessages: Message[] = savedMessages.map((msg) => ({
         id: msg.id,
@@ -366,6 +370,10 @@ export default function ChatPage() {
 
     console.log('📤 메시지 전송 시작:', input)
     sendingRef.current = true
+    isStreamingRef.current = true // 스트리밍 시작
+    
+    // 타이밍 측정 시작
+    const timingLogger = new FrontendTimingLogger(currentSessionId || 'new', input)
     
     const userInput = input
     setInput('')
@@ -380,7 +388,7 @@ export default function ChatPage() {
       if (newSessionId) {
         currentSessionIdToUse = newSessionId
         setSessionId(newSessionId)
-        await selectSession(newSessionId)
+        // selectSession을 호출하지 않음 - 메시지는 로컬에서 관리하고 서버에서 자동 저장됨
       }
     }
 
@@ -404,11 +412,6 @@ export default function ChatPage() {
       return [...prev, userMessage]
     })
 
-    // 사용자 메시지 저장 (로그인한 경우) - UI 업데이트 후
-    if (isAuthenticated && currentSessionIdToUse) {
-      await saveMessage(currentSessionIdToUse, 'user', userInput)
-    }
-
     // 로그 초기화
     setAgentData({
       orchestrationResult: null,
@@ -423,7 +426,14 @@ export default function ChatPage() {
     const abortController = new AbortController()
     abortControllerRef.current = abortController
 
+    // 타이밍: 세션 준비 완료
+    timingLogger.mark('session_ready')
+    timingLogger.mark('ui_updated')
+    timingLogger.mark('request_start')
+
     try {
+      let firstLogReceived = false
+      
       await sendMessageStream(
         userInput,
         currentSessionIdToUse || sessionId,
@@ -431,6 +441,15 @@ export default function ChatPage() {
         (log: string) => {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
+          
+          // 타이밍: 첫 로그 수신
+          if (!firstLogReceived) {
+            timingLogger.mark('first_log_received')
+            firstLogReceived = true
+          }
+          
+          // 백엔드 단계 감지
+          timingLogger.markFromLog(log)
           
           setAgentData((prev) => ({
             ...prev,
@@ -445,6 +464,9 @@ export default function ChatPage() {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
           
+          // 타이밍: 결과 수신
+          timingLogger.mark('result_received')
+          
           const botMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: response.response,
@@ -453,6 +475,9 @@ export default function ChatPage() {
             source_urls: response.source_urls,
             used_chunks: response.used_chunks,
           }
+
+          // 타이밍: 파싱 완료
+          timingLogger.mark('parse_complete')
 
           // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
           setMessages((prev) => {
@@ -464,21 +489,23 @@ export default function ChatPage() {
               console.log('🚫 중복 답변 차단:', response.response.substring(0, 50))
               return prev
             }
+            console.log('✅ 답변 추가:', response.response.substring(0, 50))
             return [...prev, botMessage]
           })
 
-          // 어시스턴트 메시지 저장 (로그인한 경우)
+          // 타이밍: 렌더링 완료
+          timingLogger.mark('render_complete')
+
+          // 스트리밍 종료 표시 (메시지 추가 직후)
+          isStreamingRef.current = false
+
+          // 첫 메시지인 경우 세션 제목 업데이트 (로그인한 경우)
           if (isAuthenticated && currentSessionIdToUse) {
-            await saveMessage(currentSessionIdToUse, 'assistant', response.response)
-            
-            // 첫 메시지인 경우 세션 제목 업데이트
-            setMessages((prev) => {
-              if (prev.filter(m => m.isUser).length === 1 && userInput) {
-                const title = userInput.substring(0, 50)
-                updateSessionTitle(currentSessionIdToUse, title)
-              }
-              return prev
-            })
+            const userMessageCount = messages.filter(m => m.isUser).length + 1 // +1은 방금 추가한 메시지
+            if (userMessageCount === 1 && userInput) {
+              const title = userInput.substring(0, 50)
+              updateSessionTitle(currentSessionIdToUse, title)
+            }
           }
 
           // Agent 디버그 데이터 업데이트
@@ -489,6 +516,19 @@ export default function ChatPage() {
             finalAnswer: response.response,
             rawAnswer: response.raw_answer || null  // ✅ 원본 답변 추가
           }))
+          
+          // 백엔드 타이밍 정보 저장
+          if (response.metadata?.timing) {
+            timingLogger.setBackendTiming(response.metadata.timing)
+          }
+          
+          // 타이밍: 저장 완료 & 전체 완료
+          timingLogger.mark('save_complete')
+          timingLogger.mark('total_complete')
+          
+          // 타이밍 로그 저장 및 출력
+          timingLogger.printSummary()
+          timingLogger.logToLocalStorage()
         },
         // 에러 콜백
         (error: string) => {
@@ -525,6 +565,7 @@ export default function ChatPage() {
         setCurrentLog('')
       }
       sendingRef.current = false
+      isStreamingRef.current = false // 스트리밍 종료
       abortControllerRef.current = null
       console.log('✅ 메시지 전송 완료')
     }

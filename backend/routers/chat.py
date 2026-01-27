@@ -16,6 +16,7 @@ from services.multi_agent import (
     generate_final_answer,
     AVAILABLE_AGENTS
 )
+from utils.timing_logger import TimingLogger
 
 router = APIRouter()
 
@@ -322,8 +323,11 @@ async def chat_stream(request: ChatRequest):
             # 중복 호출 방지 체크 및 시간 측정 시작
             import time
             pipeline_start = time.time()
-            request_id = f"{session_id}:{message}:{int(time.time())}"
+            request_id = f"{session_id}:{message[:30]}:{int(time.time())}"
             print(f"\n🔵 [STREAM_REQUEST_START] {request_id}")
+            
+            # 타이밍 로거 초기화
+            timing_logger = TimingLogger(session_id, request_id)
 
             # 로그를 큐에 추가하는 콜백
             def log_callback(msg: str):
@@ -349,6 +353,7 @@ async def chat_stream(request: ChatRequest):
                 conversation_sessions[session_id] = []
 
             history = conversation_sessions[session_id]
+            timing_logger.mark("history_loaded")
 
             # ========================================
             # 1단계: Orchestration Agent
@@ -368,8 +373,10 @@ async def chat_stream(request: ChatRequest):
             
             # Orchestration Agent 실행 (백그라운드)
             orch_start = time.time()
+            timing_logger.mark("orch_start", orch_start)
+            
             async def run_orch():
-                return await run_orchestration_agent(message, history)
+                return await run_orchestration_agent(message, history, timing_logger)
             
             orch_task = asyncio.create_task(run_orch())
             
@@ -388,6 +395,7 @@ async def chat_stream(request: ChatRequest):
             
             orchestration_result = orch_task.result()
             orch_time = time.time() - orch_start
+            timing_logger.mark("orch_complete")
 
             if "error" in orchestration_result:
                 error_msg = f"❌ Orchestration 오류: {orchestration_result.get('error')}"
@@ -495,11 +503,14 @@ async def chat_stream(request: ChatRequest):
             
             # Sub Agents 실행 (백그라운드)
             sub_start = time.time()
+            timing_logger.mark("sub_agents_start", sub_start)
+            
             async def run_subs():
                 return await execute_sub_agents(
                     execution_plan,
                     extracted_scores=extracted_scores,
-                    user_message=message
+                    user_message=message,
+                    timing_logger=timing_logger
                 )
             
             subs_task = asyncio.create_task(run_subs())
@@ -526,6 +537,7 @@ async def chat_stream(request: ChatRequest):
             
             sub_agent_results = subs_task.result()
             sub_time = time.time() - sub_start
+            timing_logger.mark("sub_agents_complete")
             
             yield send_log("")
             for key, result in sub_agent_results.items():
@@ -549,12 +561,15 @@ async def chat_stream(request: ChatRequest):
             
             # Final Agent 실행 (백그라운드)
             final_start = time.time()
+            timing_logger.mark("final_start", final_start)
+            
             async def run_final():
                 return await generate_final_answer(
                     user_question=message,
                     answer_structure=answer_structure,
                     sub_agent_results=sub_agent_results,
-                    history=history
+                    history=history,
+                    timing_logger=timing_logger
                 )
             
             final_task = asyncio.create_task(run_final())
@@ -581,6 +596,7 @@ async def chat_stream(request: ChatRequest):
             
             final_result = final_task.result()
             final_time = time.time() - final_start
+            timing_logger.mark("final_complete")
 
             final_answer = final_result.get("final_answer", "답변 생성 실패")
             raw_answer = final_result.get("raw_answer", "")  # ✅ 원본 답변
@@ -601,6 +617,8 @@ async def chat_stream(request: ChatRequest):
             # 최근 10턴만 유지
             if len(history) > 20:
                 conversation_sessions[session_id] = history[-20:]
+            
+            timing_logger.mark("history_saved")
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -608,6 +626,7 @@ async def chat_stream(request: ChatRequest):
                 final_answer,
                 is_fact_mode=len(sources) > 0
             )
+            timing_logger.mark("db_saved")
 
             # 전체 파이프라인 시간 계산
             pipeline_time = time.time() - pipeline_start
@@ -626,7 +645,32 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"#   • 전체: {pipeline_time:.2f}초")
             yield send_log(f"{'#'*80}")
             
+            # 초상세 타이밍 로그 출력
+            for timing_line in timing_logger.get_detailed_log_lines():
+                yield send_log(timing_line)
+            
+            # 타이밍 측정 완료 및 저장
+            timing_logger.mark("response_sent")
+            timing_logger.log_to_file()
+            timing_logger.print_summary()
+            
             print(f"🟢 [STREAM_REQUEST_END] {request_id}\n")
+
+            # 타이밍 정보 수집
+            timing_summary = timing_logger.get_summary()
+            
+            # metadata에 타이밍 정보 추가
+            metadata = final_result.get("metadata", {})
+            metadata["timing"] = {
+                "total_time": timing_summary.get("total_time", 0),
+                "orchestration_time": timing_summary.get("orchestration_time", 0),
+                "sub_agents_time": timing_summary.get("sub_agents_time", 0),
+                "final_agent_time": timing_summary.get("final_agent_time", 0),
+                "durations": timing_summary.get("durations", {}),
+                "orchestration_details": timing_summary.get("orchestration_details"),
+                "sub_agents_details": timing_summary.get("sub_agents_details"),
+                "final_agent_details": timing_summary.get("final_agent_details"),
+            }
 
             # 최종 응답 전송
             result = ChatResponse(
@@ -637,7 +681,7 @@ async def chat_stream(request: ChatRequest):
                 used_chunks=used_chunks,  # 사용된 청크 추가
                 orchestration_result=orchestration_result,
                 sub_agent_results=sub_agent_results,
-                metadata=final_result.get("metadata", {}),
+                metadata=metadata,
                 logs=logs
             )
             yield f"data: {json.dumps({'type': 'result', 'data': result.dict()})}\n\n"
