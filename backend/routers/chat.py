@@ -39,6 +39,8 @@ class ChatResponse(BaseModel):
     source_urls: List[str] = []
     used_chunks: Optional[List[Dict[str, Any]]] = None  # 답변에 사용된 청크
     # 멀티에이전트 디버그 데이터
+    router_output: Optional[Dict[str, Any]] = None  # Router 출력 (최상위)
+    function_results: Optional[Dict[str, Any]] = None  # Function 결과 (최상위)
     orchestration_result: Optional[Dict[str, Any]] = None
     sub_agent_results: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -112,6 +114,8 @@ async def chat(request: ChatRequest):
                 response="죄송합니다. 질문 분석 중 오류가 발생했습니다. 다시 시도해주세요.",
                 sources=[],
                 source_urls=[],
+                router_output=orchestration_result.get("router_output"),
+                function_results=orchestration_result.get("function_results"),
                 orchestration_result=orchestration_result,
                 sub_agent_results=None,
                 metadata=None
@@ -230,6 +234,8 @@ async def chat(request: ChatRequest):
                 sources=[],
                 source_urls=[],
                 used_chunks=[],
+                router_output=orchestration_result.get("router_output"),
+                function_results=orchestration_result.get("function_results"),
                 orchestration_result=orchestration_result,
                 sub_agent_results=None,
                 metadata={"immediate_response": True, "pipeline_time": pipeline_time}
@@ -382,6 +388,8 @@ async def chat(request: ChatRequest):
             sources=sources,
             source_urls=source_urls,
             used_chunks=final_result.get("used_chunks", []),  # 사용된 청크 추가
+            router_output=orchestration_result.get("router_output"),
+            function_results=orchestration_result.get("function_results"),
             orchestration_result=orchestration_result,
             sub_agent_results=sub_agent_results,
             metadata=final_result.get("metadata", {})
@@ -499,6 +507,8 @@ async def chat_stream(request: ChatRequest):
                     response="죄송합니다. 질문 분석 중 오류가 발생했습니다. 다시 시도해주세요.",
                     sources=[],
                     source_urls=[],
+                    router_output=orchestration_result.get("router_output"),
+                    function_results=orchestration_result.get("function_results"),
                     orchestration_result=orchestration_result,
                     sub_agent_results=None,
                     metadata=None,
@@ -575,6 +585,8 @@ async def chat_stream(request: ChatRequest):
                     sources=[],
                     source_urls=[],
                     used_chunks=[],
+                    router_output=orchestration_result.get("router_output"),
+                    function_results=orchestration_result.get("function_results"),
                     orchestration_result=orchestration_result,
                     sub_agent_results=None,
                     metadata={"immediate_response": True, "pipeline_time": pipeline_time},
@@ -773,6 +785,8 @@ async def chat_stream(request: ChatRequest):
                 sources=sources,
                 source_urls=source_urls,
                 used_chunks=used_chunks,  # 사용된 청크 추가
+                router_output=orchestration_result.get("router_output"),
+                function_results=orchestration_result.get("function_results"),
                 orchestration_result=orchestration_result,
                 sub_agent_results=sub_agent_results,
                 metadata=metadata,

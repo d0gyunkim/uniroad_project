@@ -47,23 +47,26 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
             chunks_text = f"오류: {result['error']}\n\n{chunks_text}"
         
         return {
-            "user_intent": "router_agent 테스트",
+            "router_output": result,  # Router 출력 (function_calls, raw_response, tokens)
+            "function_results": function_results,  # 함수 실행 결과
+            "direct_response": chunks_text,  # 청크 텍스트 (채팅창 표시용)
+            # 하위 호환용 레거시 필드
+            "user_intent": "router_agent",
             "execution_plan": [],
             "answer_structure": [],
-            "direct_response": chunks_text,  # 청크 데이터로 변경
-            "extracted_scores": {},
-            "router_result": result,  # 원본 결과
-            "function_results": function_results  # 함수 실행 결과 추가
+            "extracted_scores": {}
         }
         
     except Exception as e:
         return {
             "error": str(e),
+            "router_output": {"error": str(e)},
+            "function_results": {},
+            "direct_response": f"Router Agent 오류: {str(e)}",
+            # 하위 호환용
             "user_intent": "오류 발생",
             "execution_plan": [],
-            "answer_structure": [],
-            "direct_response": f"Router Agent 오류: {str(e)}",
-            "function_results": {}
+            "answer_structure": []
         }
 
 

@@ -120,7 +120,7 @@ function getStatusColor(status: string): string {
 
 function getStatusBgColor(status: string): string {
   switch (status) {
-    case 'ok': return ''
+    case 'ok': return 'bg-green-50'
     case 'warning': return 'bg-yellow-50'
     case 'error': return 'bg-red-50'
     default: return ''
@@ -363,14 +363,14 @@ export default function AdminAgentPage() {
           <table className="w-full bg-white rounded-lg shadow-sm border border-gray-200">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-20">ID</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-32">이전 대화</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-48">사용자 질문</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-56">Router 출력</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-32">Function 결과</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-12">ID</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-24">이전 대화</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-32">사용자 질문</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-48">Router 출력</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-72">Function 결과</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-40">최종 답변</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-20">시간</th>
-                <th className="px-2 py-2 text-center text-xs font-semibold text-gray-600 w-16">액션</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-12">시간</th>
+                <th className="px-2 py-2 text-center text-xs font-semibold text-gray-600 w-10">액션</th>
               </tr>
             </thead>
             <tbody>
@@ -426,8 +426,8 @@ export default function AdminAgentPage() {
                       <div className="flex-1 min-w-0">
                         <ExpandableCell content={log.routerOutput} maxLength={35} cleanRouter={true} isExpanded={isExpanded} />
                       </div>
-                      {log.evaluation?.routerStatus !== 'ok' && log.evaluation?.routerComment && (
-                        <div className="text-[9px] text-gray-500 mt-0.5 truncate" title={log.evaluation.routerComment}>
+                      {log.evaluation?.routerComment && (
+                        <div className={`text-[9px] mt-0.5 truncate ${log.evaluation?.routerStatus === 'ok' ? 'text-green-600' : 'text-gray-500'}`} title={log.evaluation.routerComment}>
                           {log.evaluation.routerComment.length > 50 ? log.evaluation.routerComment.substring(0, 50) + '...' : log.evaluation.routerComment}
                         </div>
                       )}
@@ -439,12 +439,12 @@ export default function AdminAgentPage() {
                         <div className="flex-1 min-w-0">
                           <ExpandableCell 
                             content={formatFunctionResult(log.functionResult)} 
-                            maxLength={30} 
+                            maxLength={50} 
                             isExpanded={isExpanded} 
                           />
-                          {log.evaluation?.functionStatus !== 'ok' && log.evaluation?.functionComment && (
-                            <div className="text-[9px] text-gray-500 mt-0.5 truncate" title={log.evaluation.functionComment}>
-                              {log.evaluation.functionComment.length > 40 ? log.evaluation.functionComment.substring(0, 40) + '...' : log.evaluation.functionComment}
+                          {log.evaluation?.functionComment && (
+                            <div className={`text-[9px] mt-0.5 truncate ${log.evaluation?.functionStatus === 'ok' ? 'text-green-600' : 'text-gray-500'}`} title={log.evaluation.functionComment}>
+                              {log.evaluation.functionComment.length > 50 ? log.evaluation.functionComment.substring(0, 50) + '...' : log.evaluation.functionComment}
                             </div>
                           )}
                         </div>

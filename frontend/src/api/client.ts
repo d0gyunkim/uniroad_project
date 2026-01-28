@@ -80,6 +80,8 @@ export interface ChatResponse {
   source_urls: string[]
   used_chunks?: UsedChunk[]  // 답변에 사용된 청크
   // 멀티에이전트 디버그 데이터
+  router_output?: Record<string, any>  // Router 출력 (최상위)
+  function_results?: Record<string, any>  // Function 결과 (최상위)
   orchestration_result?: OrchestrationResult
   sub_agent_results?: Record<string, SubAgentResult>
   metadata?: Record<string, any>
@@ -152,17 +154,18 @@ export const sendMessageStream = async (
     
     onLog('✨ 분석 완료!')
     
-    // Router Agent JSON 응답을 ChatResponse 형식으로 변환
+    // 백엔드 응답을 그대로 전달
     const chatResponse: ChatResponse = {
-      response: JSON.stringify(data.response, null, 2),  // JSON을 문자열로 표시
-      raw_answer: JSON.stringify(data.response, null, 2),
-      sources: [],
-      source_urls: [],
-      orchestration_result: data.response,  // 원본 JSON 저장
-      metadata: {
-        processing_time: data.processing_time,
-        session_id: data.session_id
-      }
+      response: data.response,  // 청크 텍스트 그대로
+      raw_answer: data.raw_answer || data.response,
+      sources: data.sources || [],
+      source_urls: data.source_urls || [],
+      used_chunks: data.used_chunks,
+      router_output: data.router_output,  // Router 출력
+      function_results: data.function_results,  // Function 결과
+      orchestration_result: data.orchestration_result,
+      sub_agent_results: data.sub_agent_results,
+      metadata: data.metadata
     }
     
     onResult(chatResponse)
