@@ -6,15 +6,8 @@ Admin Evaluate Router
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Dict, Any
-import sys
-import os
 
-# 루트의 multi_agent 폴더를 import 경로에 추가
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-
-from multi_agent.admin_agent import evaluate_router_output
+from services.multi_agent.admin_agent import evaluate_router_output
 
 router = APIRouter()
 

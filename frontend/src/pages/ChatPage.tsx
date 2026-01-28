@@ -103,10 +103,10 @@ export default function ChatPage() {
     currentSessionId,
     messages: savedMessages,
     createSession,
-    saveMessage,
     selectSession,
     startNewChat,
     updateSessionTitle,
+    deleteSession,
   } = useChat()
   
   const [messages, setMessages] = useState<Message[]>([])
@@ -158,6 +158,38 @@ export default function ChatPage() {
       checkAdminStatus()
     }
   }, [isAuthenticated])
+
+  // savedMessages가 변경되면 로컬 messages 상태에 동기화
+  useEffect(() => {
+    console.log('🔄 [ChatPage] savedMessages 변경 감지:', {
+      savedMessagesLength: savedMessages?.length,
+      currentSessionId,
+      savedMessages
+    })
+    
+    if (savedMessages && savedMessages.length > 0) {
+      // 메시지가 있을 때만 변환
+      const convertedMessages: Message[] = savedMessages.map(msg => ({
+        id: msg.id,
+        text: msg.content,
+        isUser: msg.role === 'user',
+        sources: msg.sources,
+        source_urls: msg.source_urls,
+      }))
+      console.log('✅ [ChatPage] 메시지 변환 완료:', convertedMessages.length, '개')
+      setMessages(convertedMessages)
+    } else if (savedMessages && savedMessages.length === 0 && currentSessionId) {
+      // 세션이 선택되었지만 메시지가 없는 경우 (새 세션)
+      console.log('🆕 [ChatPage] 빈 세션으로 설정')
+      setMessages([])
+    } else {
+      console.log('⚠️ [ChatPage] 조건 불일치:', { 
+        hasSavedMessages: !!savedMessages, 
+        length: savedMessages?.length, 
+        hasSessionId: !!currentSessionId 
+      })
+    }
+  }, [savedMessages, currentSessionId])
 
   const fetchAnnouncements = async () => {
     try {
@@ -546,7 +578,7 @@ export default function ChatPage() {
             addLog({
               conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
               userQuestion: userInput,
-              routerOutput: response.orchestration_result?.router_result || response.orchestration_result || null,
+              routerOutput: response.orchestration_result || null,
               functionResult: null,
               finalAnswer: response.response,
               elapsedTime: elapsedMs,
@@ -619,7 +651,7 @@ export default function ChatPage() {
             addLog({
               conversationHistory: [],
               userQuestion: `[추가실행 ${runIndex + 2}] ${question}`,
-              routerOutput: response.orchestration_result?.router_result || response.orchestration_result || null,
+              routerOutput: response.orchestration_result || null,
               functionResult: null,
               finalAnswer: response.response,
               elapsedTime: elapsedMs,
@@ -958,26 +990,48 @@ export default function ChatPage() {
                   }
 
                   return filteredSessions.map((session) => (
-                    <button
+                    <div
                       key={session.id}
-                      onClick={() => {
-                        selectSession(session.id)
-                        setIsSideNavOpen(false)
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                      className={`w-full px-3 py-2 rounded-lg transition-colors flex items-center justify-between group ${
                         currentSessionId === session.id
                           ? 'bg-blue-50 text-blue-900'
                           : 'hover:bg-gray-50 text-gray-900'
                       }`}
                     >
-                      <p className="text-xs font-medium truncate">{session.title}</p>
-                      <p className="text-[10px] text-gray-500 mt-0.5">
-                        {new Date(session.updated_at).toLocaleDateString('ko-KR', {
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      </p>
-                    </button>
+                      <button
+                        onClick={() => {
+                          selectSession(session.id)
+                          setIsSideNavOpen(false)
+                        }}
+                        className="flex-1 text-left min-w-0"
+                      >
+                        <p className="text-xs font-medium truncate">{session.title}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          {new Date(session.updated_at).toLocaleDateString('ko-KR', {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </p>
+                      </button>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          if (confirm('이 채팅 내역을 삭제하시겠습니까?')) {
+                            try {
+                              await deleteSession(session.id)
+                            } catch (error) {
+                              alert('삭제에 실패했습니다.')
+                            }
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 p-1 transition-opacity"
+                        title="삭제"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   ))
                 })()}
               </div>
@@ -1277,7 +1331,6 @@ export default function ChatPage() {
                 isUser={msg.isUser}
                 sources={msg.sources}
                 source_urls={msg.source_urls}
-                used_chunks={msg.used_chunks}
               />
             ))}
 

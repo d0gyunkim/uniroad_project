@@ -178,6 +178,52 @@ async def chat(request: ChatRequest):
             
             print(f"🟢 [REQUEST_END] {request_id}\n")
 
+            # 메시지를 DB에 저장 (즉시 응답 경로)
+            try:
+                print(f"📝 메시지 저장 시도: session_id={session_id}")
+                session_check = supabase_service.client.table("chat_sessions")\
+                    .select("id, user_id")\
+                    .eq("id", session_id)\
+                    .execute()
+                
+                print(f"🔍 세션 확인 결과: {session_check.data}")
+                
+                if session_check.data:
+                    print(f"✅ 세션 존재 확인, 메시지 저장 중...")
+                    # 사용자 메시지 저장
+                    user_msg = supabase_service.client.table("chat_messages").insert({
+                        "session_id": session_id,
+                        "role": "user",
+                        "content": message,
+                        "sources": [],
+                        "source_urls": []
+                    }).execute()
+                    print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
+                    
+                    # AI 응답 메시지 저장
+                    ai_msg = supabase_service.client.table("chat_messages").insert({
+                        "session_id": session_id,
+                        "role": "assistant",
+                        "content": direct_response,
+                        "sources": [],
+                        "source_urls": []
+                    }).execute()
+                    print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
+                    
+                    # 세션 updated_at 갱신
+                    supabase_service.client.table("chat_sessions")\
+                        .update({"updated_at": "now()"})\
+                        .eq("id", session_id)\
+                        .execute()
+                    
+                    print(f"💾 메시지 저장 완료: {session_id}")
+                else:
+                    print(f"⚠️ 세션이 DB에 존재하지 않음: {session_id}")
+            except Exception as save_error:
+                print(f"⚠️ 메시지 저장 실패: {save_error}")
+                import traceback
+                traceback.print_exc()
+
             return ChatResponse(
                 response=direct_response,
                 raw_answer=direct_response,
@@ -281,6 +327,54 @@ async def chat(request: ChatRequest):
         log_and_emit(f"{'#'*80}")
         
         print(f"🟢 [REQUEST_END] {request_id}\n")
+
+        # 메시지를 DB에 저장 (세션이 유효한 경우에만) 
+
+        try:
+            print(f"📝 메시지 저장 시도: session_id={session_id}")
+            # 세션이 존재하는지 확인
+            session_check = supabase_service.client.table("chat_sessions")\
+                .select("id, user_id")\
+                .eq("id", session_id)\
+                .execute()
+            
+            print(f"🔍 세션 확인 결과: {session_check.data}")
+            
+            if session_check.data:
+                print(f"✅ 세션 존재 확인, 메시지 저장 중...")
+                # 사용자 메시지 저장
+                user_msg = supabase_service.client.table("chat_messages").insert({
+                    "session_id": session_id,
+                    "role": "user",
+                    "content": message,
+                    "sources": [],
+                    "source_urls": []
+                }).execute()
+                print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
+                
+                # AI 응답 메시지 저장
+                ai_msg = supabase_service.client.table("chat_messages").insert({
+                    "session_id": session_id,
+                    "role": "assistant",
+                    "content": final_answer,
+                    "sources": sources,
+                    "source_urls": source_urls
+                }).execute()
+                print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
+                
+                # 세션 updated_at 갱신
+                supabase_service.client.table("chat_sessions")\
+                    .update({"updated_at": "now()"})\
+                    .eq("id", session_id)\
+                    .execute()
+                
+                print(f"💾 메시지 저장 완료: {session_id}")
+            else:
+                print(f"⚠️ 세션이 DB에 존재하지 않음: {session_id} (로그인이 필요하거나 임시 세션)")
+        except Exception as save_error:
+            print(f"⚠️ 메시지 저장 실패 (계속 진행): {save_error}")
+            import traceback
+            traceback.print_exc()
 
         return ChatResponse(
             response=final_answer,
@@ -749,31 +843,3 @@ async def get_agents():
     return {"agents": AVAILABLE_AGENTS}
 
 
-@router.post("/agents")
-async def add_agent(agent: Dict[str, Any]):
-    """새 Sub Agent 추가 (런타임)"""
-    from services.multi_agent.orchestration_agent import AVAILABLE_AGENTS as agents_list
-    
-    if "name" not in agent or "description" not in agent:
-        raise HTTPException(status_code=400, detail="name과 description은 필수입니다")
-
-    if any(a["name"] == agent["name"] for a in agents_list):
-        raise HTTPException(status_code=400, detail=f"이미 존재하는 에이전트: {agent['name']}")
-
-    new_agent = {"name": agent["name"], "description": agent["description"]}
-    agents_list.append(new_agent)
-    return {"message": "에이전트 추가 완료", "agent": new_agent}
-
-
-@router.delete("/agents/{agent_name}")
-async def delete_agent(agent_name: str):
-    """Sub Agent 삭제 (런타임)"""
-    from services.multi_agent.orchestration_agent import AVAILABLE_AGENTS as agents_list
-    
-    original_len = len(agents_list)
-    agents_list[:] = [a for a in agents_list if a["name"] != agent_name]
-
-    if len(agents_list) == original_len:
-        raise HTTPException(status_code=404, detail=f"에이전트를 찾을 수 없음: {agent_name}")
-
-    return {"message": "에이전트 삭제 완료", "agent_name": agent_name}

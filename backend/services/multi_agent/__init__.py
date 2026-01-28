@@ -1,20 +1,16 @@
 """
-Multi-Agent 호환 레이어
-- 기존 chat.py와 호환되면서 router_agent 출력만 사용
+Multi-Agent Pipeline v2
+Router → Functions → Main Agent 구조
+- backend/services/multi_agent/ 로 통합됨
 """
 
-import sys
-import os
 import json
 from typing import Dict, Any, List
 
-# 루트의 multi_agent 폴더를 import 경로에 추가
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-sys.path.insert(0, ROOT_DIR)
+from .router_agent import RouterAgent, route_query
+from .admin_agent import AdminAgent, evaluate_router_output
 
-from multi_agent.router_agent import route_query, RouterAgent
-
-# 기존 코드 호환용
+# 기존 chat.py 호환용
 AVAILABLE_AGENTS = [
     {"name": "router_agent", "description": "질문을 분석하여 적절한 함수 호출을 결정하는 에이전트"}
 ]
@@ -85,3 +81,34 @@ async def generate_final_answer(
 def get_agent(name: str):
     """에이전트 가져오기"""
     return None
+
+
+# ============================================================
+# 더미 모듈 객체 (chat.py 호환용)
+# - chat.py에서 orchestration_agent.set_log_callback() 등 호출
+# - router_agent 모드에서는 실제로 사용하지 않음
+# ============================================================
+class _DummyModule:
+    """set_log_callback 호출을 무시하는 더미 모듈"""
+    def set_log_callback(self, callback):
+        pass
+
+orchestration_agent = _DummyModule()
+sub_agents = _DummyModule()
+final_agent = _DummyModule()
+
+
+__all__ = [
+    "RouterAgent",
+    "route_query",
+    "AdminAgent",
+    "evaluate_router_output",
+    "AVAILABLE_AGENTS",
+    "run_orchestration_agent",
+    "execute_sub_agents",
+    "generate_final_answer",
+    "get_agent",
+    "orchestration_agent",
+    "sub_agents",
+    "final_agent",
+]
