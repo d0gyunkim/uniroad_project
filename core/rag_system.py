@@ -368,20 +368,28 @@ class RAGSystem:
         
         print(f"📊 가중 평균 유사도 계산 완료: 상위 10개 선택")
         
-        # 8. 결과 포맷팅: 청크 id, 섹션 id, 문서 id 반환
+        # 8. 결과 포맷팅: 청크 id, 섹션 id, 문서 id 뿐만 아니라
+        #    page_number, chunk_type, content까지 모두 포함하여 반환
         results = []
         for item in top_10_chunks:
             doc = item["doc"]
-            chunk_id = doc.metadata.get("chunk_id")
-            section_id = doc.metadata.get("section_id")
-            document_id = doc.metadata.get("document_id")
+            metadata = doc.metadata
+            chunk_id = metadata.get("chunk_id")
             
-            if chunk_id:  # chunk_id가 있는 경우만 추가
-                results.append({
-                    "chunk_id": chunk_id,
-                    "section_id": section_id,
-                    "document_id": document_id
-                })
+            if not chunk_id:
+                continue
+            
+            results.append({
+                "chunk_id": chunk_id,
+                "section_id": metadata.get("section_id"),
+                "document_id": metadata.get("document_id"),
+                "page_number": metadata.get("page_number"),
+                "chunk_type": metadata.get("chunk_type"),
+                # SupabaseSearcher에서 raw_data를 page_content로 넣었으므로
+                # 여기서는 그대로 content로 노출
+                "content": doc.page_content,
+                "score": metadata.get("score", 0.0),
+            })
         
         return results
     

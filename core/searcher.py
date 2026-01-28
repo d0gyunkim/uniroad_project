@@ -93,11 +93,13 @@ class SupabaseSearcher:
             query_embedding = self.embeddings.embed_query(query)
             
             # 2. Supabase RPC 함수 호출
+            # Supabase 함수 인자 이름에 맞춰 파라미터 구성
             rpc_params = {
-                "query_embedding": query_embedding,
                 "filter_school_name": school_name,
+                "filter_section_id": section_id,
+                "match_count": top_k,
                 "match_threshold": 0.0,  # 모든 결과 반환 (점수로 필터링)
-                "match_count": top_k
+                "query_embedding": query_embedding,
             }
             
             # section_id가 제공된 경우 필터 추가, None이면 전체 문서 검색
