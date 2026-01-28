@@ -10,6 +10,7 @@ from .searcher import SearchEngine
 from .preprocessor import SectionPreprocessor
 from .rag_system import RAGSystem
 from .quality_evaluator import QualityEvaluator
+from .supabase_uploader import SupabaseUploader, upload_to_supabase
 
 __all__ = [
     "TOCProcessor",
@@ -19,5 +20,7 @@ __all__ = [
     "SectionPreprocessor",
     "RAGSystem",
     "QualityEvaluator",
+    "SupabaseUploader",
+    "upload_to_supabase",
 ]
 

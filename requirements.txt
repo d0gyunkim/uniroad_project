@@ -12,4 +12,5 @@ google-generativeai
 pillow
 tiktoken
 pymupdf
+supabase
 

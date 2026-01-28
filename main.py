@@ -13,7 +13,8 @@ from core import (
     TOCProcessor,
     SectionPreprocessor,
     RAGSystem,
-    SearchEngine
+    SearchEngine,
+    SupabaseUploader
 )
 import config
 
@@ -75,6 +76,20 @@ with st.sidebar:
     st.markdown("✅ 동적 섹션 선택")
     st.markdown("✅ 표 구조 인식 및 요약")
     st.markdown("✅ 효율적 처리")
+    
+    st.markdown("---")
+    st.markdown("### 📤 Supabase 업로드")
+    upload_to_supabase_enabled = st.checkbox(
+        "전처리 완료 후 Supabase에 자동 업로드",
+        value=False,
+        help="체크하면 PDF 전처리 완료 후 자동으로 Supabase에 업로드합니다."
+    )
+    school_name_input = st.text_input(
+        "학교 이름",
+        value="",
+        help="Supabase에 업로드할 때 사용할 학교 이름을 입력하세요.",
+        disabled=not upload_to_supabase_enabled
+    )
     
     st.markdown("---")
     st.markdown("### ⚙️ 시스템 상태")
@@ -838,6 +853,42 @@ if uploaded_file:
             st.session_state["section_vectorstores"][section_key] = data
         
         st.success("✅ PDF 업로드 및 전처리 완료! (목차 분석, 표 인식, 임베딩 생성)")
+        
+        # Supabase 업로드 (옵션)
+        if upload_to_supabase_enabled and school_name_input:
+            try:
+                st.info("📤 Supabase에 데이터 업로드 중...")
+                
+                # 모든 섹션의 문서 수집
+                all_chunks = []
+                for section_key, data in result["section_data"].items():
+                    documents = data.get("documents", [])
+                    all_chunks.extend(documents)
+                
+                # 업로드할 데이터 준비
+                processed_data = {
+                    "toc_sections": result["sections"],
+                    "chunks": all_chunks
+                }
+                
+                # Supabase 업로드
+                uploader = SupabaseUploader()
+                document_id = uploader.upload_to_supabase(
+                    school_name=school_name_input,
+                    file_path=pdf_path,
+                    processed_data=processed_data
+                )
+                
+                if document_id:
+                    st.success(f"✅ Supabase 업로드 완료! (문서 ID: {document_id})")
+                else:
+                    st.warning("⚠️ Supabase 업로드 실패. 환경 변수를 확인하세요.")
+            except Exception as e:
+                st.error(f"❌ Supabase 업로드 중 오류: {str(e)}")
+                import traceback
+                with st.expander("상세 오류 정보"):
+                    st.code(traceback.format_exc())
+        
         st.rerun()
 
 # 초기화 버튼

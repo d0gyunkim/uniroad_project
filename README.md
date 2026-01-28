@@ -19,6 +19,12 @@ Google Gemini를 활용한 **목차 기반 동적 라우팅 RAG (Retrieval-Augme
 - **⚡ 스트리밍 답변**: 실시간으로 답변을 생성하여 Time-to-First-Token 최적화
 - **✅ 품질 평가 및 재시도**: LLM 기반 답변 품질 평가 및 자동 재시도
 - **💬 대화 연속성**: 이전 대화 맥락을 고려한 자연스러운 답변
+- **🗄️ Supabase 통합**: PostgreSQL + pgvector 기반 벡터 데이터베이스 지원
+  - **완전한 Supabase 기반 RAG 시스템**: 로컬 FAISS 대신 Supabase를 기본 저장소로 사용
+  - 전처리된 PDF 데이터를 체계적으로 DB에 저장
+  - 문서, 섹션, 청크 계층 구조로 관리
+  - 동적 라우팅: Supabase에서 섹션 목록 조회 및 선택
+  - 벡터 유사도 검색: Supabase RPC 함수를 통한 효율적인 검색
 
 ## 🏗️ 시스템 아키텍처
 
@@ -41,16 +47,21 @@ PDF 업로드
   ├─ Dual Chunking 처리
   │  ├─ 표: summary(검색용) + raw_data(원본) 분리
   │  └─ 텍스트: 페이지 단위 또는 토큰 기반 청킹
-  └─ 임베딩 생성 및 FAISS 벡터스토어 생성
+  └─ 임베딩 생성 및 Supabase 업로드
   ↓
-섹션별 벡터스토어 캐시 저장
+Supabase 데이터베이스에 저장
+  ├─ documents 테이블: 문서 메타데이터
+  ├─ document_sections 테이블: 섹션 정보
+  └─ document_chunks 테이블: 청크 + 임베딩 벡터
 
 [질의응답 단계]
-사용자 질문
+사용자 질문 + 학교 이름
+  ↓
+Supabase에서 섹션 목록 조회
   ↓
 LLM 섹션 선택 (동적 라우팅)
   ↓
-선택된 섹션별 표/텍스트 분리 검색 (벡터 유사도 검색, 병렬 처리)
+Supabase RPC 함수로 벡터 유사도 검색 (선택된 섹션 필터링)
   ↓
 검색 결과 통합 및 점수 정렬
   ↓
@@ -114,12 +125,27 @@ Context Swap (표는 raw_data 사용, 텍스트는 page_content 사용)
   - 토큰 기반: overlap 정보 활용한 정확한 병합
 
 ### 5. `core/searcher.py` - 검색 엔진
-- **벡터 검색**: FAISS 유사도 검색 (`similarity_search_with_score`)
-- **점수 변환**: 거리 점수를 유사도 점수로 변환 (0에 가까울수록 유사)
-- **단순화된 검색**: 복잡한 BM25, RRF, Reranking 로직 제거
+- **SearchEngine**: 로컬 FAISS 기반 검색 (레거시 지원)
+- **SupabaseSearcher**: Supabase 기반 벡터 검색 (기본 사용)
+  - Supabase RPC `match_document_chunks` 함수 호출
+  - `school_name`과 `section_id`로 필터링
+  - Context Swap: 반환된 Document의 `page_content`에 `raw_data` 사용
+  - 메타데이터에 `page_number`, `score`, `chunk_type`, `section_title` 포함
+  - 임베딩 벡터로 유사도 검색 수행
 
 ### 6. `core/rag_system.py` - RAG 시스템
-- **섹션 선택**: Gemini LLM으로 질문과 관련된 섹션 선택
+- **Supabase 통합**: Supabase 클라이언트 및 임베딩 모델 자동 초기화
+- **`_get_relevant_sections`**: Supabase에서 학교별 섹션 목록 조회
+- **`find_relevant_sections`**: Gemini LLM으로 질문과 관련된 섹션 선택
+  - Supabase에서 섹션 목록 자동 조회 (로컬 파일 불필요)
+  - 동적 라우팅: 질문 분석 후 관련 섹션만 선택
+- **`retrieve`**: SupabaseSearcher를 사용한 벡터 유사도 검색
+  - 선택된 `section_id`로 필터링된 검색
+  - `school_name`으로 학교별 데이터 분리
+- **`answer`**: 전체 RAG 파이프라인 통합 메서드
+  - 동적 라우팅 → Supabase 검색 → 문서 병합 → Elbow Method → 답변 생성
+  - `school_name` 필수 인자
+  - 스트리밍 모드 지원
 - **표/텍스트 분리 병합**: 표와 텍스트 문서를 별도로 처리
 - **청크 병합**: 청크 타입에 따라 다른 병합 방식 적용
   - 페이지 단위: 페이지 번호 기준으로 연속된 페이지 병합
@@ -139,12 +165,23 @@ Context Swap (표는 raw_data 사용, 텍스트는 page_content 사용)
 - **LLM 기반 평가**: 답변의 관련성, 완전성, 정확성, 유용성 평가
 - **재시도 트리거**: 품질이 낮으면 자동 재시도
 
+### 8. `core/supabase_uploader.py` - Supabase 업로더
+- **데이터베이스 마이그레이션**: FAISS 로컬 저장소에서 Supabase로 전환
+- **계층적 데이터 저장**: 문서 → 섹션 → 청크 구조로 체계적 관리
+- **배치 처리 최적화**: 임베딩 생성 및 청크 삽입을 배치로 처리하여 효율성 극대화
+- **Dual Chunking 지원**: 검색용 `content`와 답변용 `raw_data` 분리 저장
+- **4단계 업로드 프로세스**:
+  1. `documents` 테이블에 문서 등록 (school_name, filename, metadata)
+  2. `document_sections` 테이블에 섹션 등록 및 section_map 생성
+  3. 배치 임베딩 생성 (GoogleGenerativeAIEmbeddings)
+  4. `document_chunks` 테이블에 청크 등록 (100개 단위 배치)
+
 ## 🔧 기술 스택
 
 ### LLM & Embeddings
 - **LLM**: Google Gemini 3 Flash Preview (`temperature=0`)
 - **Vision Model**: Google Gemini 2.0 Flash Exp (이미지-마크다운 변환)
-- **Embeddings**: Google Gemini Embeddings (`models/embedding-001`)
+- **Embeddings**: Google Gemini Embeddings (`models/gemini-embedding-001`, 3072차원)
 
 ### PDF 처리
 - **PyPDF2**: PDF 페이지 추출 및 섹션 분리
@@ -155,8 +192,13 @@ Context Swap (표는 raw_data 사용, 텍스트는 page_content 사용)
   - 표는 `<table_summary>` 태그로 요약 포함
 
 ### 벡터 검색
-- **FAISS**: 효율적인 유사도 검색
-- **similarity_search_with_score**: 거리 기반 유사도 검색
+- **Supabase (pgvector)**: PostgreSQL 기반 벡터 데이터베이스 (기본 사용)
+  - 3072차원 임베딩 벡터 저장 (Gemini Embeddings)
+  - RPC 함수 `match_document_chunks`를 통한 벡터 유사도 검색
+  - `school_name`과 `section_id`로 필터링 지원
+  - 확장 가능한 클라우드 기반 솔루션
+  - Context Swap: 검색 시 `raw_data` 자동 사용
+- **FAISS**: 로컬 저장소 (레거시 지원, Supabase 마이그레이션 완료)
 
 ### 병렬 처리
 - **ThreadPoolExecutor**: 섹션 전처리 및 페이지 변환 병렬화
@@ -170,6 +212,7 @@ Context Swap (표는 raw_data 사용, 텍스트는 page_content 사용)
 
 - Python 3.8 이상
 - Google Gemini API Key (Vision API 사용)
+- Supabase 계정 및 프로젝트 (Supabase 업로더 사용 시)
 
 ## 🔧 설치 방법
 
@@ -196,11 +239,17 @@ pip install -r requirements.txt
 `.env` 파일에 API 키를 추가하세요:
 
 ```env
+# Google Gemini API
 GEMINI_API_KEY=your_google_api_key_here
+
+# Supabase (Supabase 업로더 사용 시)
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
 ```
 
 **API 키 발급:**
 - Google Gemini: [Google AI Studio](https://makersuite.google.com/app/apikey)
+- Supabase: [Supabase Dashboard](https://app.supabase.com/) → 프로젝트 설정 → API
 
 ## 🚀 사용 방법
 
@@ -227,6 +276,125 @@ streamlit run main.py --server.port 8053
 - "전형별 모집 인원을 비교해주세요"
 - "논술전형 제출 서류는 무엇인가요?"
 - "원서 접수 기간은 언제인가요?"
+
+## 🗄️ Supabase 기반 RAG 시스템
+
+### 개요
+
+이 시스템은 **Supabase (PostgreSQL + pgvector)**를 기본 벡터 저장소로 사용합니다. 로컬 FAISS 대신 클라우드 기반 데이터베이스를 사용하여 확장성과 유지보수성을 크게 향상시켰습니다.
+
+### 주요 특징
+
+1. **완전한 Supabase 통합**
+   - 모든 벡터 검색이 Supabase RPC 함수를 통해 수행
+   - 로컬 파일 시스템 의존성 제거
+   - 클라우드 기반 확장 가능한 아키텍처
+
+2. **동적 라우팅 (Supabase 기반)**
+   - Supabase `document_sections` 테이블에서 섹션 목록 자동 조회
+   - LLM이 질문 분석 후 관련 섹션만 선택
+   - `school_name`으로 학교별 데이터 완전 분리
+
+3. **효율적인 벡터 검색**
+   - Supabase RPC `match_document_chunks` 함수 사용
+   - `school_name`과 `section_id`로 필터링된 검색
+   - Context Swap: 검색 시 자동으로 `raw_data` 사용
+
+4. **계층적 데이터 구조**
+   ```
+   documents (학교별 문서)
+     └── document_sections (섹션 정보)
+           └── document_chunks (청크 + 임베딩 벡터)
+   ```
+
+### 5. Supabase에 데이터 업로드
+
+**⚠️ 중요**: RAG 시스템이 Supabase를 기본으로 사용하므로, PDF 데이터를 먼저 Supabase에 업로드해야 합니다.
+
+#### 방법 1: ingest_pdf.py 스크립트 사용 (권장)
+
+```bash
+python scripts/ingest_pdf.py
+```
+
+스크립트 내에서 다음 설정을 수정하세요:
+```python
+PDF_FILE_PATH = "테스트_폴더/2026학년도_고려대(서울)_입학전형시행계획(2025.05).pdf"
+SCHOOL_NAME = "고려대학교"
+```
+
+#### 방법 2: Python 코드로 직접 업로드
+
+```python
+from core.supabase_uploader import upload_to_supabase
+
+# 전처리된 데이터 준비
+processed_data = {
+    "toc_sections": [
+        {"title": "1. 모집요강", "start_page": 1, "end_page": 10},
+        {"title": "2. 전형방법", "start_page": 11, "end_page": 20}
+    ],
+    "chunks": [Document(...), Document(...), ...]  # LangChain Document 리스트
+}
+
+# Supabase에 업로드
+document_id = upload_to_supabase(
+    school_name="고려대학교",
+    file_path="/path/to/file.pdf",
+    processed_data=processed_data
+)
+```
+
+### 6. Supabase 기반 RAG 시스템 사용
+
+데이터 업로드 후, Supabase 기반 RAG 시스템을 사용할 수 있습니다:
+
+```python
+from core.rag_system import RAGSystem
+
+# RAG 시스템 초기화 (Supabase 자동 연결)
+rag_system = RAGSystem()
+
+# 답변 생성 (일반 모드)
+result = rag_system.answer(
+    question="고려대학교 수시 전형은 어떻게 되나요?",
+    school_name="고려대학교",  # 필수
+    conversation_history=[],
+    stream=False
+)
+
+print(result["answer"])
+print(f"선택된 섹션: {len(result['selected_sections'])}개")
+print(f"근거 문서: {len(result['evidence'])}개")
+
+# 답변 생성 (스트리밍 모드)
+for chunk in rag_system.answer(
+    question="고려대학교 수시 전형은 어떻게 되나요?",
+    school_name="고려대학교",
+    stream=True
+):
+    print(chunk, end="", flush=True)
+```
+
+**업로드 프로세스:**
+1. **문서 등록**: `documents` 테이블에 학교명, 파일명, 메타데이터 저장
+2. **섹션 등록**: `document_sections` 테이블에 목차 섹션 정보 저장
+3. **임베딩 생성**: 모든 청크의 임베딩을 배치로 생성 (3072차원, Gemini Embeddings)
+4. **청크 등록**: `document_chunks` 테이블에 청크 데이터 저장 (100개 단위 배치)
+   - Dual Chunking: `content`(검색용)와 `raw_data`(답변용) 분리 저장
+   - 섹션 ID 자동 매핑
+   - 페이지 번호 및 청크 타입 저장
+   - 임베딩 벡터는 pgvector 형식으로 자동 저장
+
+**Supabase 테이블 스키마:**
+- `documents`: `id`, `school_name`, `filename`, `metadata` (jsonb)
+- `document_sections`: `id`, `document_id` (FK), `section_name`, `page_start`, `page_end`
+- `document_chunks`: `id`, `document_id` (FK), `section_id` (FK), `content`, `raw_data`, `embedding` (vector 3072), `page_number`, `chunk_type`
+
+**Supabase RPC 함수:**
+- `match_document_chunks`: 벡터 유사도 검색 함수
+  - 파라미터: `query_embedding` (vector), `filter_school_name` (text), `filter_section_id` (int, 선택), `match_threshold` (float), `match_count` (int)
+  - 반환: `id`, `content`, `raw_data`, `page_number`, `chunk_type`, `section_id`, `document_id`, `section_name`, `similarity` (float)
 
 ## 📊 Gemini Vision 기반 PDF 처리 상세
 
@@ -319,7 +487,7 @@ streamlit run main.py --server.port 8053
 ### 기본 설정
 ```python
 DEFAULT_LLM_MODEL = "gemini-3-flash-preview"  # Gemini 3 Flash Preview
-DEFAULT_EMBEDDING_MODEL = "models/embedding-001"
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"  # Gemini Embeddings (3072차원)
 ```
 
 ### 청킹 설정
@@ -358,7 +526,7 @@ MAX_WORKERS = 4              # 섹션 전처리 및 페이지 변환 병렬 처�
 ## 📁 프로젝트 구조
 
 ```
-임베딩_기반 2/
+임베딩_기반/
 ├── main.py                  # 메인 Streamlit 애플리케이션
 ├── config.py                # 설정 파일
 ├── requirements.txt         # 필요한 Python 패키지
@@ -371,9 +539,14 @@ MAX_WORKERS = 4              # 섹션 전처리 및 페이지 변환 병렬 처�
 │   ├── vision_processor.py # Gemini Vision 기반 PDF 처리
 │   ├── preprocessor.py     # 섹션 전처리
 │   ├── chunker.py         # 스마트 청킹 및 Dual Chunking
-│   ├── searcher.py        # 검색 엔진
-│   ├── rag_system.py      # RAG 시스템 (섹션 선택, Re-ranking 포함)
-│   └── quality_evaluator.py # 품질 평가
+│   ├── searcher.py        # 검색 엔진 (SupabaseSearcher 포함)
+│   ├── rag_system.py      # RAG 시스템 (Supabase 통합)
+│   ├── quality_evaluator.py # 품질 평가
+│   └── supabase_uploader.py # Supabase 업로더
+├── scripts/                # 유틸리티 스크립트
+│   ├── ingest_pdf.py      # PDF 수집 및 Supabase 업로드
+│   ├── test_embedding.py  # 임베딩 모델 테스트
+│   └── test_rag_supabase.py # Supabase RAG 시스템 테스트
 ├── prompts/               # 프롬프트 템플릿
 │   └── pdf-rag.yaml      # RAG 프롬프트
 └── .cache/               # 캐시 디렉토리 (자동 생성)
@@ -423,6 +596,17 @@ MAX_WORKERS = 4              # 섹션 전처리 및 페이지 변환 병렬 처�
 - 파일 수정 시간 기반 캐시 무효화
 - 같은 PDF는 재처리하지 않음
 
+### 9. Supabase 통합 (완전한 마이그레이션 완료)
+- **기본 저장소**: 로컬 FAISS 대신 Supabase를 기본 벡터 저장소로 사용
+- **계층적 데이터 구조**: 문서 → 섹션 → 청크 3단계 구조
+- **배치 처리 최적화**: 임베딩 생성 및 청크 삽입을 배치로 처리
+- **Dual Chunking 지원**: 검색용 `content`와 답변용 `raw_data` 분리 저장
+- **자동 섹션 매핑**: 섹션 이름 기반으로 section_id 자동 매핑
+- **동적 라우팅**: Supabase에서 섹션 목록 조회 후 LLM으로 선택
+- **벡터 검색**: Supabase RPC 함수를 통한 효율적인 유사도 검색
+- **Context Swap**: 검색 시 자동으로 `raw_data` 사용
+- **에러 처리**: 각 단계별 상세한 에러 처리 및 진행 상황 출력
+
 ## 💡 사용 팁
 
 1. **초기 업로드**: PDF 전처리는 처음 1회만 수행되며, 이후에는 캐시를 사용합니다
@@ -432,6 +616,11 @@ MAX_WORKERS = 4              # 섹션 전처리 및 페이지 변환 병렬 처�
 5. **재시도**: 답변 품질이 낮으면 자동으로 재시도합니다 (최대 3회)
 6. **동적 컷오프**: 관련성 낮은 문서는 자동으로 제거되어 더 빠르고 정확한 답변을 제공합니다
 7. **스트리밍 답변**: 답변이 실시간으로 생성되어 즉각적인 피드백을 받을 수 있습니다
+8. **Supabase 통합 (완료)**: 
+   - FAISS 로컬 저장소에서 Supabase로 완전히 마이그레이션 완료
+   - 확장 가능한 클라우드 기반 솔루션
+   - 동적 라우팅과 벡터 검색이 모두 Supabase 기반으로 동작
+   - `school_name`으로 학교별 데이터 완전 분리
 
 ## 🐛 문제 해결
 
@@ -470,6 +659,36 @@ pip install faiss-cpu --no-cache
 lsof -ti:8053 | xargs kill -9
 ```
 
+### Supabase 연결 오류
+```
+ValueError: Supabase 환경 변수가 설정되지 않았습니다.
+```
+→ `.env` 파일에 `SUPABASE_URL`과 `SUPABASE_KEY`가 올바르게 설정되었는지 확인하세요
+→ Supabase 프로젝트의 API 설정에서 URL과 anon key를 확인하세요
+
+### Supabase 임베딩 차원 오류
+```
+⚠️ 임베딩 차원이 예상과 다릅니다: XXX (예상: 768)
+```
+→ Google Gemini Embeddings 모델(`models/gemini-embedding-001`)은 3072차원을 사용합니다
+→ Supabase의 `document_chunks` 테이블의 `embedding` 컬럼이 `vector(3072)` 타입인지 확인하세요
+→ 기존 768차원 컬럼이 있다면 마이그레이션이 필요합니다
+
+### 섹션 매핑 실패
+```
+⚠️ 섹션 'XXX'에 대한 ID를 찾을 수 없습니다.
+```
+→ 청크의 `metadata['section_title']`이 `toc_sections`의 `title`과 정확히 일치하는지 확인하세요
+→ 섹션 등록이 성공적으로 완료되었는지 확인하세요
+
+### Supabase RPC 함수 오류
+```
+❌ Supabase 검색 중 오류: function match_document_chunks does not exist
+```
+→ Supabase에 `match_document_chunks` RPC 함수가 생성되어 있는지 확인하세요
+→ 함수는 `query_embedding`, `filter_school_name`, `filter_section_id`, `match_threshold`, `match_count` 파라미터를 받아야 합니다
+→ 반환값에 `raw_data`, `section_name` 필드가 포함되어야 합니다
+
 ## 📝 라이선스
 
 이 프로젝트는 개인 학습 및 연구 목적으로 사용할 수 있습니다.
@@ -481,6 +700,8 @@ lsof -ti:8053 | xargs kill -9
 - [Streamlit Documentation](https://docs.streamlit.io/)
 - [Google Gemini Vision API](https://ai.google.dev/docs)
 - [PyMuPDF Documentation](https://pymupdf.readthedocs.io/)
+- [Supabase Documentation](https://supabase.com/docs)
+- [pgvector Documentation](https://github.com/pgvector/pgvector)
 
 ## 📚 상세 문서
 

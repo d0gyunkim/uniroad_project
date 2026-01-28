@@ -21,7 +21,10 @@ if UPSTAGE_API_KEY:
 # 참고: gemini-3.0-flash-lite는 아직 사용 불가능합니다.
 # 사용 가능한 모델: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp
 DEFAULT_LLM_MODEL = "gemini-3-flash-preview"  # 빠르고 안정적인 최신 모델
-DEFAULT_EMBEDDING_MODEL = "models/embedding-001"
+# 임베딩 모델 설정 (기본값 사용 시 모델명 생략 가능)
+# 사용 가능한 모델: "models/embedding-001" (구버전, 더 이상 사용 불가)
+# 최신 모델: 기본값 사용 또는 "text-embedding-004"
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001" # None이면 기본 모델 사용
 
 # [변경 후] Long Context 전략 설정
 # 청킹 설정
