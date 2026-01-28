@@ -50,6 +50,19 @@ with st.sidebar:
     max_retries = st.slider("최대 재시도 횟수", min_value=1, max_value=5, value=config.DEFAULT_MAX_RETRIES)
     
     st.markdown("---")
+    st.markdown("### 🧪 테스트 모드")
+    extract_only_mode = st.checkbox(
+        "원본 정보만 추출 (LLM 답변 생성 없음)",
+        value=False,
+        help="체크하면 검색된 문서의 원본 정보만 추출하여 표시합니다. LLM 기반 답변 생성은 건너뜁니다."
+    )
+    clean_extract_mode = st.checkbox(
+        "순수 정보만 출력 (메타데이터 제외)",
+        value=False,
+        help="체크하면 메타데이터나 추가 정보 없이 쿼리에 적절한 정보만 깔끔하게 출력합니다."
+    )
+    
+    st.markdown("---")
     st.markdown("### 📑 목차 기반 동적 라우팅")
     st.markdown("1. 원본 PDF 업로드")
     st.markdown("2. 목차 자동 감지 및 파싱")
@@ -212,7 +225,161 @@ def build_toc_index_and_preprocess(pdf_path, _cache_key, _file_mtime):
     }
 
 
-def query_with_retry(question, pdf_path, toc_index, max_retries=3):
+def extract_clean_information(retrieved_docs, question):
+    """
+    검색된 문서들의 순수 정보만 추출 (메타데이터 제외, Elbow Method 기반 동적 컷오프 적용)
+    
+    Args:
+        retrieved_docs: Document 리스트 (similarity_score가 메타데이터에 포함됨)
+        question: 사용자 질문
+        
+    Returns:
+        포맷팅된 순수 정보 문자열 (메타데이터 없음)
+    """
+    if not retrieved_docs:
+        return "검색된 문서가 없습니다."
+    
+    # Elbow Method 기반 동적 컷오프 적용
+    from core.rag_system import RAGSystem
+    rag_system = RAGSystem()
+    filtered_docs = rag_system._apply_dynamic_cutoff(retrieved_docs)
+    
+    if not filtered_docs:
+        return "동적 컷오프 적용 후 관련 문서를 찾을 수 없습니다."
+    
+    # 순수 정보만 추출 (메타데이터 없이)
+    output_parts = []
+    
+    for doc in filtered_docs:
+        # 원본 내용만 추출
+        if doc.metadata.get('is_table', False) and doc.metadata.get('raw_data'):
+            # 표의 경우 raw_data 사용
+            output_parts.append(doc.metadata['raw_data'])
+        else:
+            # 텍스트의 경우 page_content 사용
+            output_parts.append(doc.page_content)
+        
+        # 문서 간 구분
+        output_parts.append("\n\n---\n\n")
+    
+    return "".join(output_parts).strip()
+
+
+def extract_raw_information(retrieved_docs, question):
+    """
+    검색된 문서들의 원본 정보만 추출하여 포맷팅 (Elbow Method 기반 동적 컷오프 적용)
+    
+    Args:
+        retrieved_docs: Document 리스트 (similarity_score가 메타데이터에 포함됨)
+        question: 사용자 질문
+        
+    Returns:
+        포맷팅된 원본 정보 문자열
+    """
+    if not retrieved_docs:
+        return "검색된 문서가 없습니다."
+    
+    # 동적 컷오프 적용 전 문서 수
+    original_count = len(retrieved_docs)
+    
+    # Elbow Method 기반 동적 컷오프 적용 (rag_system의 메서드 사용)
+    from core.rag_system import RAGSystem
+    rag_system = RAGSystem()
+    filtered_docs = rag_system._apply_dynamic_cutoff(retrieved_docs)
+    
+    if not filtered_docs:
+        return "동적 컷오프 적용 후 관련 문서를 찾을 수 없습니다."
+    
+    # 컷오프 적용 후 문서 수
+    filtered_count = len(filtered_docs)
+    
+    # 포맷팅된 정보 생성
+    output_parts = []
+    output_parts.append(f"## 📋 질문: {question}\n")
+    output_parts.append(f"**검색된 문서 수:** {original_count}개 → **컷오프 적용 후:** {filtered_count}개\n")
+    if original_count > filtered_count:
+        removed_count = original_count - filtered_count
+        output_parts.append(f"*✂️ Elbow Method 기반 동적 컷오프로 관련성 낮은 문서 {removed_count}개 제거됨*\n")
+    output_parts.append("---\n")
+    
+    # 섹션별로 그룹화 (컷오프 적용된 문서만)
+    docs_by_section = {}
+    for doc in filtered_docs:
+        section_title = doc.metadata.get('section_title', '알 수 없음')
+        if section_title not in docs_by_section:
+            docs_by_section[section_title] = []
+        docs_by_section[section_title].append(doc)
+    
+    doc_counter = 1
+    for section_title, docs in sorted(docs_by_section.items()):
+        output_parts.append(f"### 📑 섹션: {section_title}\n")
+        output_parts.append(f"**문서 수:** {len(docs)}개\n\n")
+        
+        for doc in docs:
+            # 메타데이터 정보 수집
+            metadata_info = []
+            is_table = doc.metadata.get('is_table', False)
+            chunk_type = doc.metadata.get('chunk_type', 'token')
+            
+            # 페이지 정보
+            if chunk_type == 'page':
+                page_number = doc.metadata.get('page_number', 0)
+                page_range = doc.metadata.get('page_range', None)
+                if page_range:
+                    metadata_info.append(f"📄 페이지 {page_range}")
+                elif page_number > 0:
+                    metadata_info.append(f"📄 페이지 {page_number}")
+            else:
+                if 'section_start' in doc.metadata and 'section_end' in doc.metadata:
+                    metadata_info.append(f"📄 페이지 {doc.metadata['section_start']}-{doc.metadata['section_end']}")
+            
+            # 표 여부
+            if is_table:
+                metadata_info.append("📊 표 데이터")
+            
+            # 병합 정보
+            if doc.metadata.get('merged_chunks', 0) > 1:
+                merged_count = doc.metadata['merged_chunks']
+                if chunk_type == 'page':
+                    metadata_info.append(f"🔗 {merged_count}개 페이지 병합")
+                else:
+                    metadata_info.append(f"🔗 {merged_count}개 청크 병합")
+            
+            # 유사도 점수
+            similarity_score = doc.metadata.get('similarity_score', 0)
+            if similarity_score > 0:
+                metadata_info.append(f"⭐ 관련성: {similarity_score:.3f}")
+            
+            output_parts.append(f"#### 문서 {doc_counter}\n")
+            if metadata_info:
+                output_parts.append(f"**정보:** {' | '.join(metadata_info)}\n\n")
+            
+            # 원본 내용 추출
+            if is_table and doc.metadata.get('raw_data'):
+                # 표의 경우 raw_data 사용
+                output_parts.append("**원본 표 데이터:**\n")
+                output_parts.append("```markdown\n")
+                output_parts.append(doc.metadata['raw_data'])
+                output_parts.append("\n```\n")
+                
+                # 요약도 함께 표시
+                if doc.page_content and doc.page_content.strip():
+                    output_parts.append("\n**표 요약:**\n")
+                    output_parts.append(f"{doc.page_content}\n")
+            else:
+                # 텍스트의 경우 page_content 사용
+                output_parts.append("**원본 내용:**\n")
+                output_parts.append("```\n")
+                output_parts.append(doc.page_content)
+                output_parts.append("\n```\n")
+            
+            output_parts.append("\n---\n\n")
+            doc_counter += 1
+    
+    return "".join(output_parts)
+
+
+def query_with_retry(question, pdf_path, toc_index, max_retries=3, extract_only=False, clean_extract=False):
     """
     질의응답 수행 (재시도 포함)
     
@@ -221,10 +388,12 @@ def query_with_retry(question, pdf_path, toc_index, max_retries=3):
         pdf_path: PDF 파일 경로
         toc_index: 목차 인덱스
         max_retries: 최대 재시도 횟수
+        extract_only: True면 원본 정보만 추출, False면 LLM 답변 생성
+        clean_extract: True면 메타데이터 없이 순수 정보만 출력
         
     Returns:
         {
-            "answer": 답변,
+            "answer": 답변 또는 원본 정보,
             "evidence": 근거 문서 리스트,
             "selected_sections": 선택된 섹션 리스트
         }
@@ -470,41 +639,60 @@ def query_with_retry(question, pdf_path, toc_index, max_retries=3):
                 percentage = (count / len(retrieved_docs)) * 100 if retrieved_docs else 0
                 st.markdown(f"- **{section_title}**: {count}개 문서 ({percentage:.1f}%)")
         
-        # 4단계: 답변 생성 (대화 연속성 고려, 스트리밍 적용)
-        st.info("🤖 답변 생성 중... (직접 컨텍스트 사용 + 대화 맥락 반영)")
-        # 이전 대화 히스토리 준비
-        conversation_history = []
-        if st.session_state["messages"]:
-            for msg in st.session_state["messages"]:
-                role = msg.role if hasattr(msg, 'role') else msg.get('role', '')
-                content = msg.content if hasattr(msg, 'content') else msg.get('content', '')
-                if role in ["user", "assistant"]:
-                    conversation_history.append((role, content))
-        
-        # 스트리밍 모드로 답변 생성
-        answer_chunks = []
-        answer_placeholder = st.empty()
-        full_answer = ""
-        
-        for chunk in rag_system.generate_answer(question, retrieved_docs, conversation_history, stream=True):
-            answer_chunks.append(chunk)
-            full_answer += chunk
-            # 실시간으로 답변 표시
-            answer_placeholder.markdown(full_answer)
-        
-        answer = full_answer
-        
-        # 5단계: 품질 평가
-        st.info("📊 답변 품질 평가 중...")
-        quality_result = rag_system.quality_evaluator.evaluate(question, answer)
-        
-        with st.expander("📋 품질 평가 결과"):
-            st.markdown(quality_result["evaluation_text"])
+        # 4단계: 답변 생성 또는 원본 정보 추출
+        if extract_only:
+            # 테스트 모드: 원본 정보만 추출
+            if clean_extract:
+                # 순수 정보만 출력 (메타데이터 제외)
+                st.info("📋 순수 정보 추출 중... (메타데이터 제외 모드)")
+                answer = extract_clean_information(retrieved_docs, question)
+            else:
+                # 원본 정보 추출 (메타데이터 포함)
+                st.info("📋 원본 정보 추출 중... (테스트 모드)")
+                answer = extract_raw_information(retrieved_docs, question)
+            
+            # 품질 평가 건너뛰기
+            quality_result = {"is_acceptable": True, "evaluation_text": "테스트 모드: 품질 평가 건너뜀"}
+        else:
+            # 일반 모드: LLM 답변 생성
+            st.info("🤖 답변 생성 중... (직접 컨텍스트 사용 + 대화 맥락 반영)")
+            # 이전 대화 히스토리 준비
+            conversation_history = []
+            if st.session_state["messages"]:
+                for msg in st.session_state["messages"]:
+                    role = msg.role if hasattr(msg, 'role') else msg.get('role', '')
+                    content = msg.content if hasattr(msg, 'content') else msg.get('content', '')
+                    if role in ["user", "assistant"]:
+                        conversation_history.append((role, content))
+            
+            # 스트리밍 모드로 답변 생성
+            answer_chunks = []
+            answer_placeholder = st.empty()
+            full_answer = ""
+            
+            # retrieved_docs_with_scores 형태로 변환 (generate_answer가 요구하는 형태)
+            retrieved_docs_with_scores = [(doc, doc.metadata.get('similarity_score', 0)) for doc in retrieved_docs]
+            
+            for chunk in rag_system.generate_answer(question, retrieved_docs_with_scores, conversation_history, stream=True):
+                answer_chunks.append(chunk)
+                full_answer += chunk
+                # 실시간으로 답변 표시
+                answer_placeholder.markdown(full_answer)
+            
+            answer = full_answer
+            
+            # 5단계: 품질 평가
+            st.info("📊 답변 품질 평가 중...")
+            quality_result = rag_system.quality_evaluator.evaluate(question, answer)
+            
+            with st.expander("📋 품질 평가 결과"):
+                st.markdown(quality_result["evaluation_text"])
         
         # 근거 문서 정보 수집
         evidence_docs = []
         evidence_by_section = {}  # 섹션별 근거 문서 그룹화
         
+        # retrieved_docs는 이미 리스트이므로 그대로 사용
         for doc in retrieved_docs[:10]:
             page_info = ""
             section_info = ""
@@ -541,11 +729,16 @@ def query_with_retry(question, pdf_path, toc_index, max_retries=3):
                         else:
                             page_info = f"섹션: {section_info}{table_label}"
             
+            # 표의 경우 raw_data 우선 사용
+            doc_content = doc.page_content
+            if doc.metadata.get('is_table', False) and doc.metadata.get('raw_data'):
+                doc_content = doc.metadata['raw_data']
+            
             doc_info = {
-                "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
+                "content": doc_content[:500] + "..." if len(doc_content) > 500 else doc_content,
                 "page_info": page_info,
                 "section_info": section_info,
-                "full_content": doc.page_content,
+                "full_content": doc_content,
                 "is_table": doc.metadata.get('is_table', False) if hasattr(doc, 'metadata') and doc.metadata else False
             }
             evidence_docs.append(doc_info)
@@ -673,15 +866,25 @@ if user_input:
                     user_input,
                     pdf_path,
                     toc_index,
-                    max_retries
+                    max_retries,
+                    extract_only=extract_only_mode,
+                    clean_extract=clean_extract_mode
                 )
                 
                 answer = result["answer"]
                 evidence = result.get("evidence", [])
                 selected_sections = result.get("selected_sections", [])
                 
-                st.markdown("### 📝 답변")
-                st.markdown(answer)
+                if extract_only_mode:
+                    if clean_extract_mode:
+                        st.markdown("### 📋 추출된 순수 정보 (메타데이터 제외)")
+                        st.markdown(answer)
+                    else:
+                        st.markdown("### 📋 추출된 원본 정보 (테스트 모드)")
+                        st.markdown(answer)
+                else:
+                    st.markdown("### 📝 답변")
+                    st.markdown(answer)
                 
                 # 근거 문서 표시
                 if evidence:

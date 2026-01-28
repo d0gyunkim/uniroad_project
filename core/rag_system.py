@@ -402,7 +402,7 @@ class RAGSystem:
 
         Args:
             question: 사용자 질문
-            retrieved_docs: 검색된 문서 리스트
+            retrieved_docs: 검색된 문서 리스트 또는 [(Document, score), ...] 튜플 리스트
             conversation_history: 이전 대화 히스토리 [(role, content), ...]
             stream: 스트리밍 모드 여부 (True면 generator 반환, False면 문자열 반환)
 
@@ -415,6 +415,16 @@ class RAGSystem:
                 return
             else:
                 return "관련 문서를 찾을 수 없습니다."
+
+        # retrieved_docs가 튜플 리스트인지 확인하고 Document 리스트로 변환
+        if retrieved_docs and isinstance(retrieved_docs[0], tuple):
+            # [(Document, score), ...] 형태인 경우 Document 리스트로 변환
+            docs_list = []
+            for doc, score in retrieved_docs:
+                # 점수를 메타데이터에 저장
+                doc.metadata['similarity_score'] = score
+                docs_list.append(doc)
+            retrieved_docs = docs_list
 
         # Elbow Method 기반 동적 컷오프 적용 (TTFT 향상 및 노이즈 제거)
         filtered_docs = self._apply_dynamic_cutoff(retrieved_docs, min_k=5, drop_threshold=0.15)
