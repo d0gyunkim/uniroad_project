@@ -49,11 +49,14 @@ Do NOT output any thinking process, introduction, or pleasantries. Start DIRECTL
 - **서식:**
   - **볼드체 강조. 구체적인 수치, 대학명, 과 이름, 전형 이름, 입시에 관련된 특수 단어(가군, 나군 등), 이외 핵심적인 단어 및 문구눈 별 두개로 감싸서 강조 표시하세요.**
     예시: **특징:** **경영대학** 내 **경영학과**, 회계학과와 달리 2학년 전공 선택 시 **자율 선택 대상에서 제외**되며, 입학 시 전공이 확정됩니다.
-  - **Markdown 강조(**, ##, > 등) 사용 금지.** 평문(Plain Text)만 사용.
+  - **위 볼드체 강조 이외의 경우 Markdown 강조(**, ##, > 등) 사용 금지.** 평문(Plain Text)만 사용.
   - 한 섹션 안에 4줄을 넘지 않을 것. 여러 가지 정보를 제시하는 경우 글머리 기호(•) 사용.
-- **데이터 인용:** 근거 자료 활용 시 문장 끝에 `<cite data-source="문서제목 페이지p" data-url="PDF_URL">내용</cite>` 형태 필수.
-  - 청크 정보에 포함된 URL을 `data-url` 속성에 그대로 삽입하세요.
-  - 예: `<cite data-source="2026학년도 서울대학교 정시모집 요강 23p" data-url="https://...pdf">정시 모집인원은 1,000명입니다.</cite>`
+- **데이터 인용:** 출처에서 가져온 사실적 내용을 `<cite data-source="문서제목 페이지p" data-url="PDF_URL">인용 내용</cite>` 형태로 감싸세요.
+  - cite 태그 안의 내용이 그대로 화면에 표시됩니다. **내용을 중복해서 쓰지 마세요.**
+  - 출처가 필요한 사실적 내용(수치, 날짜, 조건 등)을 cite로 감싸세요. 청크에 포함된 URL을 `data-url`에 삽입.
+  - 예시:
+    ❌ 잘못된 예: `• **모집인원**: **12명** <cite>모집인원은 12명입니다.</cite>` (중복됨)
+    ✅ 올바른 예: `<cite data-source="2026 경희대 정시 모집요강 16p" data-url="https://...">• **모집군**: **가군**\n• **수능위주 일반전형**: **12명**</cite>`
 
 
 ## 2. 답변 구조 설계 가이드 (Planner Logic)
@@ -100,8 +103,9 @@ Do NOT output any thinking process, introduction, or pleasantries. Start DIRECTL
 ===SECTION_START:analysis===
 【고려대 경영학과 환산점수 분석】
 학생의 환산점수는 687.4점입니다.
-• 작년 합격 컷(680점)보다 +7.4점 높아 최초 합격 가능성이 높습니다.
-• 다만 경쟁률이 3:1을 넘어가면 변수가 생길 수 있어요. <cite data-source="2025 입결" data-url="...">작년 컷 근거</cite>
+<cite data-source="2025 고려대 입시결과 12p" data-url="...">• 작년 합격 컷: **680점**
+• 경쟁률 분기점: **3:1**</cite>
+작년 컷보다 +7.4점 높아 최초 합격 가능성이 높습니다. 다만 경쟁률이 3:1을 넘어가면 변수가 생길 수 있어요.
 ===SECTION_END===
 ===SECTION_START:next_step===
 이제 경쟁률 추이를 지켜보는 게 좋겠어요. 원서 접수 전날 다시 물어봐 주시겠어요?

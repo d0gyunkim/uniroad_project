@@ -1,11 +1,23 @@
+import { useState } from 'react'
+
 interface ChatMessageProps {
   message: string
   isUser: boolean
   sources?: string[]
   source_urls?: string[]  // 다운로드 URL (기존 방식용)
+  userQuery?: string  // AI 답변일 때 연결된 사용자 질문
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery }: ChatMessageProps) {
+  const [showFactCheck, setShowFactCheck] = useState(false)
+  
+  // ChatGPT에서 같은 질문하기
+  const openChatGPT = () => {
+    if (userQuery) {
+      const encodedQuery = encodeURIComponent(userQuery)
+      window.open(`https://chatgpt.com/?q=${encodedQuery}`, '_blank')
+    }
+  }
   // **텍스트** 형식을 볼드체로 파싱하는 헬퍼 함수
   const parseBold = (text: string | React.ReactNode): React.ReactNode => {
     if (typeof text !== 'string') return text
@@ -150,26 +162,26 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
         const citedContent = match[3] // 인용 내용
 
         parts.push(
-          <span key={`cite-${match.index}`} className="inline-flex items-baseline gap-1 flex-wrap">
-            <span className="underline decoration-blue-300/40 decoration-1 underline-offset-2">
+          <span key={`cite-${match.index}`}>
+            <span className={showFactCheck ? "bg-yellow-200/60 px-0.5" : ""}>
               {parseBold(citedContent)}
             </span>
-            {sourceUrl && sourceUrl.length > 0 ? (
+            {showFactCheck && (sourceUrl && sourceUrl.length > 0 ? (
               <a
                 href={sourceUrl}
                 download
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap hover:bg-blue-100 cursor-pointer transition-colors"
+                className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap hover:bg-blue-100 cursor-pointer transition-colors ml-1"
                 title="클릭하면 원본 PDF를 다운로드합니다"
               >
                 📄 {sourceText}
               </a>
             ) : sourceText ? (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap">
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap ml-1">
                 📄 {sourceText}
               </span>
-            ) : null}
+            ) : null)}
           </span>
         )
 
@@ -221,28 +233,28 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
       const sourceUrl = source_urls && citeIndex < source_urls.length ? source_urls[citeIndex] : null
       
       if (sourceText) {
-        // 출처가 있으면 밑줄 + 다운로드 가능한 출처 버블
+        // 출처가 있으면 형광펜 + 다운로드 가능한 출처 버블
         parts.push(
-          <span key={`cite-${match.index}`} className="inline-flex items-baseline gap-1">
-            <span className="underline decoration-blue-300/40 decoration-1 underline-offset-2">
+          <span key={`cite-${match.index}`}>
+            <span className={showFactCheck ? "bg-yellow-200/60 px-0.5" : ""}>
               {parseBold(match[1])}
             </span>
-            {sourceUrl ? (
+            {showFactCheck && (sourceUrl ? (
               <a
                 href={sourceUrl}
                 download
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap hover:bg-blue-100 cursor-pointer transition-colors"
+                className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap hover:bg-blue-100 cursor-pointer transition-colors ml-1"
                 title="클릭하면 원본 PDF를 다운로드합니다"
               >
                 {sourceText}
               </a>
             ) : (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap">
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap ml-1">
                 {sourceText}
               </span>
-            )}
+            ))}
           </span>
         )
       } else {
@@ -280,8 +292,38 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
         </div>
       ) : (
         // AI 답변: Gemini 스타일 (말풍선 없이, 폰트/간격 조정)
-        <div className="w-full text-gray-900 ai-response">
-          {renderMessage()}
+        <div className="w-full">
+          <div className="text-gray-900 ai-response mb-4">
+            {renderMessage()}
+          </div>
+          
+          {/* 버튼 영역 */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => setShowFactCheck(!showFactCheck)}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border rounded-lg text-sm font-medium transition-all ${
+                showFactCheck
+                  ? 'border-green-500 bg-green-50 text-green-700 hover:bg-green-100'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300'
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              팩트체크
+            </button>
+            
+            <button
+              onClick={openChatGPT}
+              disabled={!userQuery}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 bg-white text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              ChatGPT 답변 비교하기
+            </button>
+          </div>
         </div>
       )}
     </div>

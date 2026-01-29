@@ -725,7 +725,7 @@ export default function ChatPage() {
         onClose={() => setIsAgentPanelOpen(false)}
       />
 
-      <div className={`flex h-screen bg-gray-50 relative transition-all duration-300 ${
+      <div className={`flex h-screen bg-white relative transition-all duration-300 ${
         isAgentPanelOpen ? 'w-1/2' : 'w-full'
       }`}>
         {/* 사이드 네비게이션 */}
@@ -1344,15 +1344,29 @@ export default function ChatPage() {
               </div>
             )}
 
-            {messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg.text}
-                isUser={msg.isUser}
-                sources={msg.sources}
-                source_urls={msg.source_urls}
-              />
-            ))}
+            {messages.map((msg, index) => {
+              // AI 답변일 경우 직전 사용자 질문 찾기
+              let userQuery: string | undefined
+              if (!msg.isUser) {
+                for (let i = index - 1; i >= 0; i--) {
+                  if (messages[i].isUser) {
+                    userQuery = messages[i].text
+                    break
+                  }
+                }
+              }
+              
+              return (
+                <ChatMessage
+                  key={msg.id}
+                  message={msg.text}
+                  isUser={msg.isUser}
+                  sources={msg.sources}
+                  source_urls={msg.source_urls}
+                  userQuery={userQuery}
+                />
+              )
+            })}
 
             {isLoading && (
               <div className="flex justify-start mb-4">
