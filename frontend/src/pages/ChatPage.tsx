@@ -26,6 +26,7 @@ interface Message {
   sources?: string[]
   source_urls?: string[]
   used_chunks?: UsedChunk[]
+  isStreaming?: boolean  // 스트리밍 중인지 여부
 }
 
 interface AgentData {
@@ -459,6 +460,7 @@ export default function ChatPage() {
         id: streamingBotMessageId,
         text: '',  // 빈 상태로 시작, 청크가 도착하면 업데이트
         isUser: false,
+        isStreaming: true,  // 스트리밍 중
       }
       return [...prev, userMessage, streamingBotMessage]
     })
@@ -530,6 +532,7 @@ export default function ChatPage() {
                   sources: response.sources,
                   source_urls: response.source_urls,
                   used_chunks: response.used_chunks,
+                  isStreaming: false,  // 스트리밍 완료
                 }
               : msg
           ))
@@ -1273,7 +1276,7 @@ export default function ChatPage() {
 
         {/* 채팅 영역 */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 sm:py-8 pb-safe">
-          <div className="max-w-[653px] mx-auto">
+          <div className="max-w-[800px] mx-auto">
             {messages.length === 0 && (
               <div className="text-center py-12 sm:py-16">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
@@ -1364,6 +1367,7 @@ export default function ChatPage() {
                   sources={msg.sources}
                   source_urls={msg.source_urls}
                   userQuery={userQuery}
+                  isStreaming={msg.isStreaming}
                 />
               )
             })}
@@ -1381,7 +1385,7 @@ export default function ChatPage() {
         {/* 입력 영역 - 고정 */}
         <div className="bg-white pb-safe safe-area-bottom sticky bottom-0">
           <div className="px-4 sm:px-6 py-3 sm:py-4">
-            <div className="max-w-[653px] mx-auto flex items-end gap-2">
+            <div className="max-w-[800px] mx-auto flex items-end gap-2">
               {/* 입력 필드 */}
               <div className="flex-1 relative">
             <input

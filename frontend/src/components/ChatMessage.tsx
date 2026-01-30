@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface ChatMessageProps {
   message: string
@@ -6,10 +6,26 @@ interface ChatMessageProps {
   sources?: string[]
   source_urls?: string[]  // 다운로드 URL (기존 방식용)
   userQuery?: string  // AI 답변일 때 연결된 사용자 질문
+  isStreaming?: boolean  // 스트리밍 중인지 여부
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
+  const [showGlow, setShowGlow] = useState(false)
+  
+  // AI 답변 스트리밍이 완료되면 글로우 효과 트리거
+  useEffect(() => {
+    if (!isUser && !isStreaming && message) {
+      // 스트리밍 완료 후 짧은 딜레이 후 글로우 시작
+      const timer = setTimeout(() => {
+        setShowGlow(true)
+        // 3초 후 글로우 효과 제거 (1.5초 × 2회 반복)
+        setTimeout(() => setShowGlow(false), 3000)
+      }, 200)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [isUser, isStreaming, message])
   
   // ChatGPT에서 같은 질문하기
   const openChatGPT = () => {
@@ -17,6 +33,42 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
       const encodedQuery = encodeURIComponent(userQuery)
       window.open(`https://chatgpt.com/?q=${encodedQuery}`, '_blank')
     }
+  }
+  
+  // 복사하기
+  const handleCopy = () => {
+    navigator.clipboard.writeText(message)
+    alert('답변이 복사되었습니다.')
+  }
+  
+  // 좋아요
+  const handleLike = () => {
+    console.log('좋아요')
+    // TODO: 백엔드 API 연동
+  }
+  
+  // 싫어요
+  const handleDislike = () => {
+    console.log('싫어요')
+    // TODO: 백엔드 API 연동
+  }
+  
+  // 공유하기
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: '유니로드 답변',
+        text: message,
+      }).catch(() => {})
+    } else {
+      handleCopy()
+    }
+  }
+  
+  // 재생성
+  const handleRegenerate = () => {
+    console.log('재생성')
+    // TODO: 재생성 기능 구현
   }
   // **텍스트** 형식을 볼드체로 파싱하는 헬퍼 함수
   const parseBold = (text: string | React.ReactNode): React.ReactNode => {
@@ -98,6 +150,17 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     }
 
     return parts.length > 0 ? parts : parseBold(text)
+  }
+
+  // cite 태그 개수 세기
+  const countCiteTags = () => {
+    const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
+    const oldCiteRegex = /<cite>(.*?)<\/cite>/g
+    
+    const newMatches = message.match(newCiteRegex)
+    const oldMatches = message.match(oldCiteRegex)
+    
+    return (newMatches?.length || 0) + (oldMatches?.length || 0)
   }
 
   // <cite> 태그를 파싱해서 희미한 밑줄 + 출처 표시
@@ -287,7 +350,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       {isUser ? (
         // 사용자 메시지: 말풍선 스타일 유지
-        <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-blue-600 text-white">
+        <div className="max-w-[70%] rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
           {renderMessage()}
         </div>
       ) : (
@@ -297,33 +360,81 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
             {renderMessage()}
           </div>
           
-          {/* 버튼 영역 */}
-          <div className="flex gap-2 mt-3">
+          {/* 버튼 영역 - 스트리밍 완료 후에만 표시 */}
+          {!isStreaming && (
+          <div className="flex gap-1 mt-3 items-center">
+            {/* 복사 */}
             <button
-              onClick={() => setShowFactCheck(!showFactCheck)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border rounded-lg text-sm font-medium transition-all ${
-                showFactCheck
-                  ? 'border-green-500 bg-green-50 text-green-700 hover:bg-green-100'
-                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300'
-              }`}
+              onClick={handleCopy}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              data-tooltip="복사"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
-              팩트체크
             </button>
             
+            {/* 좋아요 */}
+            <button
+              onClick={handleLike}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              data-tooltip="좋아요"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+              </svg>
+            </button>
+            
+            {/* 싫어요 */}
+            <button
+              onClick={handleDislike}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              data-tooltip="싫어요"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+              </svg>
+            </button>
+            
+            {/* 재생성 */}
+            <button
+              onClick={handleRegenerate}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              data-tooltip="재생성"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            
+            {/* GPT (아이콘만) */}
             <button
               onClick={openChatGPT}
               disabled={!userQuery}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 bg-white text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-tooltip="ChatGPT 답변 비교하기"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/>
               </svg>
-              ChatGPT 답변 비교하기
+            </button>
+            
+            {/* 출처 확인하기 (맨 오른쪽) */}
+            <button
+              onClick={() => setShowFactCheck(!showFactCheck)}
+              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                showFactCheck
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                  : 'text-gray-500 hover:bg-gray-50'
+              } ${showGlow ? 'animate-pulse-glow' : ''}`}
+            >
+              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              출처 확인하기{countCiteTags() > 0 && `(${countCiteTags()})`}
             </button>
           </div>
+          )}
         </div>
       )}
     </div>

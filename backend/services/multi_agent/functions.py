@@ -316,8 +316,152 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                 results[f"univ_{idx}"] = result
             
             elif func_name == "consult":
-                # TODO: consult 함수 구현
-                results[f"consult_{idx}"] = {"status": "not_implemented"}
+                # Score System 통합: 성적 정규화 및 대학별 환산
+                from services.multi_agent.score_system import (
+                    normalize_scores_from_extracted,
+                    format_for_prompt,
+                    get_univ_converted_sections,
+                )
+                from services.multi_agent.score_system.search_engine import run_reverse_search
+                
+                # 토큰 추정 함수
+                def estimate_tokens(text: str) -> int:
+                    return max(1, len(text) // 2)
+                
+                CONSULT_TOKEN_LIMIT = 40960  # consult는 40960 토큰
+                
+                # 1. router_agent의 scores 형식 변환
+                # 간단 형식: {"국어": 1, "수학": 2} → 표준 형식: {"국어": {"type": "등급", "value": 1}}
+                raw_scores = params.get("scores", {})
+                converted_scores = {}
+                
+                for key, val in raw_scores.items():
+                    if isinstance(val, dict):
+                        # 이미 표준 형식인 경우
+                        converted_scores[key] = val
+                    elif isinstance(val, (int, float)):
+                        # 숫자만 있는 경우 → 등급으로 간주
+                        converted_scores[key] = {"type": "등급", "value": int(val)}
+                    else:
+                        converted_scores[key] = {"type": "등급", "value": val}
+                
+                # 2. 성적 정규화
+                normalized = normalize_scores_from_extracted(converted_scores)
+                score_text = format_for_prompt(normalized)
+                
+                # 3. 대학별 환산점수 계산
+                target_univ = params.get("target_univ", []) or []
+                target_major = params.get("target_major", []) or []
+                target_range = params.get("target_range", []) or []
+                univ_sections = get_univ_converted_sections(normalized, target_univ)
+                
+                # 4. 리버스 서치 (target_univ가 비어있거나 "어디 갈 수 있어?" 질문 시)
+                reverse_results = []
+                user_message = params.get("user_message", "") or params.get("query", "")
+                run_reverse = not target_univ or "어디 갈 수 있어" in user_message
+                
+                if run_reverse:
+                    try:
+                        reverse_results = run_reverse_search(normalized, target_range)
+                    except Exception as e:
+                        print(f"⚠️ 리버스 서치 오류: {e}")
+                
+                # 5. chunk 기반 결과 생성 (토큰 제한 적용)
+                chunks = []
+                total_tokens = 0
+                
+                # 청크 1: 성적 분석 (score_conversion)
+                score_content = f"**학생 성적 분석**\n{score_text}"
+                if univ_sections:
+                    score_content += f"\n\n**대학별 환산점수**\n{univ_sections}"
+                
+                score_tokens = estimate_tokens(score_content)
+                if score_tokens <= CONSULT_TOKEN_LIMIT:
+                    chunks.append({
+                        "document_id": "score_conversion",
+                        "chunk_id": "score_analysis",
+                        "section_id": "score_analysis",
+                        "chunk_type": "score_analysis",
+                        "content": score_content,
+                        "page_number": ""
+                    })
+                    total_tokens += score_tokens
+                else:
+                    # 토큰 초과 시 잘라서 포함
+                    truncated_len = CONSULT_TOKEN_LIMIT * 2  # 토큰 * 2 = 대략 문자 수
+                    chunks.append({
+                        "document_id": "score_conversion",
+                        "chunk_id": "score_analysis",
+                        "section_id": "score_analysis",
+                        "chunk_type": "score_analysis",
+                        "content": score_content[:truncated_len] + "\n...(생략)",
+                        "page_number": ""
+                    })
+                    total_tokens = CONSULT_TOKEN_LIMIT
+                
+                # 청크 2: 리버스 서치 결과 (admission_results)
+                if reverse_results:
+                    # 표 헤더
+                    table_header = "**지원 가능 대학 분석**\n| 대학 | 학과 | 전형 | 계열 | 70% 컷 | 내 점수 | 판정 | 모집 | 경쟁률 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+                    table_rows = []
+                    
+                    remaining_tokens = CONSULT_TOKEN_LIMIT - total_tokens
+                    header_tokens = estimate_tokens(table_header)
+                    current_tokens = header_tokens
+                    
+                    for r in reverse_results:
+                        row = "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                            r.get("univ", ""),
+                            r.get("major", ""),
+                            r.get("type", ""),
+                            r.get("field", ""),
+                            r.get("cut_70_score", ""),
+                            r.get("my_score", ""),
+                            r.get("판정", ""),
+                            r.get("recruit_count") if r.get("recruit_count") is not None else "—",
+                            r.get("competition_rate") if r.get("competition_rate") is not None else "—",
+                        )
+                        row_tokens = estimate_tokens(row)
+                        
+                        if current_tokens + row_tokens <= remaining_tokens:
+                            table_rows.append(row)
+                            current_tokens += row_tokens
+                        else:
+                            break  # 토큰 제한 도달
+                    
+                    if table_rows:
+                        reverse_content = table_header + "\n" + "\n".join(table_rows)
+                        chunks.append({
+                            "document_id": "admission_results",
+                            "chunk_id": "reverse_search",
+                            "section_id": "reverse_search",
+                            "chunk_type": "reverse_search",
+                            "content": reverse_content,
+                            "page_number": ""
+                        })
+                        total_tokens += current_tokens
+                
+                # 출처 정보
+                document_titles = {
+                    "score_conversion": "2026 수능 표준점수 및 백분위 산출 방식",
+                    "admission_results": "2025학년도 대입 전형결과"
+                }
+                document_urls = {
+                    "score_conversion": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf",
+                    "admission_results": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/b26bc045-e96b-4d3a-acb2-ac677633c685.pdf"
+                }
+                
+                results[f"consult_{idx}"] = {
+                    "chunks": chunks,
+                    "count": len(chunks),
+                    "university": "",
+                    "query": "성적 분석",
+                    "document_titles": document_titles,
+                    "document_urls": document_urls,
+                    "target_univ": target_univ,
+                    "target_major": target_major,
+                    "total_tokens": total_tokens
+                }
             
             else:
                 results[f"{func_name}_{idx}"] = {"error": f"Unknown function: {func_name}"}

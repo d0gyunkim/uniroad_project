@@ -82,8 +82,10 @@ async def chat(request: ChatRequest):
         log_and_emit(f"# Request ID: {request_id}")
         log_and_emit(f"{'#'*80}")
 
-        # 히스토리 비활성화 - 매번 새로운 답변 생성 (variation 확보)
-        history = []
+        # 세션별 히스토리 로드 (최근 20개만 유지)
+        if session_id not in conversation_sessions:
+            conversation_sessions[session_id] = []
+        history = conversation_sessions[session_id][-20:]
 
         # ========================================
         # 1단계: Orchestration Agent
@@ -153,9 +155,10 @@ async def chat(request: ChatRequest):
             log_and_emit("="*80)
             log_and_emit(f"   응답 길이: {len(direct_response)}자")
             
-            # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
-            # history.append({"role": "user", "content": message})
-            # history.append({"role": "assistant", "content": direct_response})
+            # 히스토리 저장
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": direct_response})
+            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -294,9 +297,10 @@ async def chat(request: ChatRequest):
         log_and_emit(f"   ⏱️ 처리 시간: {final_time:.2f}초")
         log_and_emit("="*80)
 
-        # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
-        # history.append({"role": "user", "content": message})
-        # history.append({"role": "assistant", "content": final_answer})
+        # 히스토리 저장
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": final_answer})
+        conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
 
         # 채팅 로그 저장
         await supabase_service.insert_chat_log(
@@ -409,8 +413,10 @@ async def chat_stream_v2(request: ChatRequest):
         pipeline_start = time.time()
         print(f"\n🔵 [STREAM_V2_START] {session_id}:{message[:30]}")
         
-        # 히스토리 비활성화 - 매번 새로운 답변 생성
-        history = []
+        # 세션별 히스토리 로드 (최근 20개만 유지)
+        if session_id not in conversation_sessions:
+            conversation_sessions[session_id] = []
+        history = conversation_sessions[session_id][-20:]
         
         full_response = ""
         timing = {}
@@ -449,9 +455,9 @@ async def chat_stream_v2(request: ChatRequest):
                     return
             
             # 대화 이력에 추가
-            # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
-            # history.append({"role": "user", "content": message})
-            # history.append({"role": "assistant", "content": full_response})
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": full_response})
+            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
             
             pipeline_time = time.time() - pipeline_start
             
@@ -572,8 +578,10 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"# 질문: {message}")
             yield send_log(f"{'#'*80}")
 
-            # 히스토리 비활성화 - 매번 새로운 답변 생성
-            history = []
+            # 세션별 히스토리 로드 (최근 20개만 유지)
+            if session_id not in conversation_sessions:
+                conversation_sessions[session_id] = []
+            history = conversation_sessions[session_id][-20:]
             timing_logger.mark("history_loaded")
 
             # ========================================
@@ -670,9 +678,10 @@ async def chat_stream(request: ChatRequest):
                 yield send_log("="*80)
                 yield send_log(f"   응답 길이: {len(direct_response)}자")
                 
-                # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
-                # history.append({"role": "user", "content": message})
-                # history.append({"role": "assistant", "content": direct_response})
+                # 히스토리 저장
+                history.append({"role": "user", "content": message})
+                history.append({"role": "assistant", "content": direct_response})
+                conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
 
                 # 채팅 로그 저장
                 await supabase_service.insert_chat_log(
@@ -835,9 +844,10 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"   ⏱️ 처리 시간: {final_time:.2f}초")
             yield send_log("="*80)
 
-            # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
-            # history.append({"role": "user", "content": message})
-            # history.append({"role": "assistant", "content": final_answer})
+            # 히스토리 저장
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": final_answer})
+            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
             
             timing_logger.mark("history_saved")
 

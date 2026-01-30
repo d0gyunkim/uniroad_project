@@ -25,7 +25,8 @@ if GEMINI_API_KEY:
 MAIN_CONFIG = {
     "model": "gemini-3-flash-preview",  # 표 해석 능력 향상을 위해 3-flash-preview 사용
     "temperature": 0.7,  # 입시 정보는 정확성 최우선 - 완전히 결정적 답변
-    "max_output_tokens": 4096,  # 40960 → 4096으로 축소 (속도 개선)
+    "max_output_tokens": 4096,  # 기본 토큰 제한 (consult는 동적으로 증가)
+    "max_output_tokens_consult": 40960,  # consult 함수 전용 토큰 제한
     "top_p": 1.0,  # temperature 0이면 무시됨
     "top_k": 1  # 가장 확률 높은 토큰만 선택 (캐싱 영향 제거)
 }
@@ -51,13 +52,12 @@ Do NOT output any thinking process, introduction, or pleasantries. Start DIRECTL
     예시: **특징:** **경영대학** 내 **경영학과**, 회계학과와 달리 2학년 전공 선택 시 **자율 선택 대상에서 제외**되며, 입학 시 전공이 확정됩니다.
   - **위 볼드체 강조 이외의 경우 Markdown 강조(**, ##, > 등) 사용 금지.** 평문(Plain Text)만 사용.
   - 한 섹션 안에 4줄을 넘지 않을 것. 여러 가지 정보를 제시하는 경우 글머리 기호(•) 사용.
-- **데이터 인용:** 출처에서 가져온 사실적 내용을 `<cite data-source="문서제목 페이지p" data-url="PDF_URL">인용 내용</cite>` 형태로 감싸세요.
+- **데이터 인용:** univ, consult 함수에서 가져온 사실적 내용을 `<cite data-source="문서제목 페이지p" data-url="PDF_URL">인용 내용</cite>` 형태로 감싸세요.
   - cite 태그 안의 내용이 그대로 화면에 표시됩니다. **내용을 중복해서 쓰지 마세요.**
-  - 출처가 필요한 사실적 내용(수치, 날짜, 조건 등)을 cite로 감싸세요. 청크에 포함된 URL을 `data-url`에 삽입.
+  - 출처가 필요한 사실적 내용(수치, 날짜, 조건 등)을 cite로 감싸세요. **청크에 포함된 출처(title)와 URL을 그대로 사용하세요.**
   - 예시:
     ❌ 잘못된 예: `• **모집인원**: **12명** <cite>모집인원은 12명입니다.</cite>` (중복됨)
     ✅ 올바른 예: `<cite data-source="2026 경희대 정시 모집요강 16p" data-url="https://...">• **모집군**: **가군**\n• **수능위주 일반전형**: **12명**</cite>`
-
 
 ## 2. 답변 구조 설계 가이드 (Planner Logic)
 질문의 성격에 따라 아래 **[가용 섹션]** 중 1~5개를 선택하여 논리적인 흐름을 구성하십시오.
@@ -181,20 +181,45 @@ class MainAgent:
                         formatted_parts.append(content)
             
             elif key.startswith("consult_"):
-                # consult 함수 결과 포맷팅 (TODO: 구현 후 수정)
+                # consult 함수 결과 포맷팅 (chunk 기반 - univ와 동일 구조)
+                chunks = result.get("chunks", [])
+                doc_titles = result.get("document_titles", {})
+                doc_urls = result.get("document_urls", {})
+                
                 formatted_parts.append(f"\n### [성적 분석 결과]")
-                formatted_parts.append(json.dumps(result, ensure_ascii=False, indent=2))
+                
+                if not chunks:
+                    formatted_parts.append("  - 분석 결과 없음")
+                else:
+                    for i, chunk in enumerate(chunks, 1):
+                        doc_id = chunk.get("document_id")
+                        title = doc_titles.get(doc_id, f"문서 {doc_id}")
+                        url = doc_urls.get(doc_id, "")
+                        content = chunk.get("content", "")
+                        
+                        # 출처 정보 포함 (URL도 추가)
+                        source_info = title
+                        formatted_parts.append(f"\n[청크 {i}] 출처: {source_info} | URL: {url}")
+                        formatted_parts.append(content)
+                
+                # 타겟 정보
+                target_univ = result.get("target_univ", [])
+                target_major = result.get("target_major", [])
+                if target_univ or target_major:
+                    formatted_parts.append(f"\n**분석 대상:** 대학 [{', '.join(target_univ) if target_univ else '전체'}] / 학과 [{', '.join(target_major) if target_major else '전체'}]")
         
         return "\n".join(formatted_parts)
     
     def _extract_citations(self, function_results: Dict[str, Any]) -> List[Dict]:
         """
         function_results에서 인용 가능한 출처 정보 추출 (URL 포함)
+        univ와 consult 모두 chunk 기반으로 동일하게 처리
         """
         citations = []
         
         for key, result in function_results.items():
-            if key.startswith("univ_"):
+            # univ와 consult 모두 동일한 chunk 구조로 처리
+            if key.startswith("univ_") or key.startswith("consult_"):
                 university = result.get("university", "")
                 chunks = result.get("chunks", [])
                 doc_titles = result.get("document_titles", {})
@@ -332,10 +357,16 @@ class MainAgent:
         
         chat = self.model.start_chat(history=gemini_history)
         
+        # consult 함수 결과가 있으면 토큰 제한 증가
+        has_consult = any(key.startswith("consult_") for key in (function_results or {}).keys())
+        generation_config = self.generation_config.copy()
+        if has_consult:
+            generation_config["max_output_tokens"] = MAIN_CONFIG.get("max_output_tokens_consult", 40960)
+        
         try:
             response = chat.send_message(
                 final_prompt,
-                generation_config=self.generation_config,
+                generation_config=generation_config,
                 safety_settings=self.safety_settings  # Safety Filter 비활성화
             )
             raw_response = response.text.strip()
@@ -418,6 +449,12 @@ class MainAgent:
         
         chat = self.model.start_chat(history=gemini_history)
         
+        # consult 함수 결과가 있으면 토큰 제한 증가
+        has_consult = any(key.startswith("consult_") for key in (function_results or {}).keys())
+        generation_config = self.generation_config.copy()
+        if has_consult:
+            generation_config["max_output_tokens"] = MAIN_CONFIG.get("max_output_tokens_consult", 40960)
+        
         try:
             # 스트리밍 모드로 호출
             start_time = time.time()
@@ -425,7 +462,7 @@ class MainAgent:
             
             response = chat.send_message(
                 final_prompt,
-                generation_config=self.generation_config,
+                generation_config=generation_config,
                 safety_settings=self.safety_settings,  # Safety Filter 비활성화
                 stream=True  # 스트리밍 활성화
             )

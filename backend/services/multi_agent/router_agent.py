@@ -69,6 +69,8 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
 
 ## 정체성
 당신이 찾은 정보와 대화의 맥락을 종합하여 main agent가 최종적인 답변을 생성합니다, 정확한 함수를 올바르게 호출하여 정보를 검색하세요.
+단일 질문 뿐 아니라 이전 대화 히스토리 내용을 고려하여 적절하게 판단하세요. 절대로 직접 답변을 생성하지 마세요. 당신의 역할은 정보 검색을 위한 json 형식의 함수 호출입니다.
+이전 히스토리의 출력은 main_agent의 출력 형식입니다. 따라하지 말고 아래에 명시된 출력 형식을 지키세요.
 
 ## 시점 동기화
 - 2026년 1월 (2026학년도 입시 진행 중)
@@ -115,27 +117,35 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
   "scores": {
     "국어": {"type": "등급", "value": 1},
     "수학": {"type": "표준점수", "value": 140},
-    "영어": {"type": "등급", "value": 2}
+    "영어": {"type": "등급", "value": 2},
+    "한국사": {"type": "등급", "value": 1},
+    "탐구1": {"type": "등급", "value": 1, "과목명": "생활과윤리"},
+    "탐구2": {"type": "등급", "value": 2, "과목명": "사회문화"}
   }
 }
 ```
-type: "등급", "표준점수", "백분위"
+- type: "등급", "표준점수", "백분위"
+- 탐구 과목은 키를 "탐구1", "탐구2"로 고정하고, 과목명이 언급된 경우 "과목명" 필드 추가
+- 한국사는 항상 포함 (미언급 시 1등급으로 기본 추정)
 
 성적 예시:
-- "11232" → {"국어": {"type": "등급", "value": 1}, "수학": {"type": "등급", "value": 1}, "영어": {"type": "등급", "value": 2}, "탐구1": {"type": "등급", "value": 3}, "탐구2": {"type": "등급", "value": 2}}
-- "국어 화작 1등급, 수학 미적 140점" → {"화법과작문": {"type": "등급", "value": 1}, "미적분": {"type": "표준점수", "value": 140}}
-- "생명과학1 2등급" → {"생명과학1": {"type": "등급", "value": 2}}
+- "11232" → {"국어": {"type": "등급", "value": 1}, "수학": {"type": "등급", "value": 1}, "영어": {"type": "등급", "value": 2}, "한국사": {"type": "등급", "value": 1}, "탐구1": {"type": "등급", "value": 3}, "탐구2": {"type": "등급", "value": 2}}
+- "국어 화작 1등급, 수학 미적 140점" → {"국어": {"type": "등급", "value": 1, "선택과목": "화법과작문"}, "수학": {"type": "표준점수", "value": 140, "선택과목": "미적분"}}
+- "생윤 2등급 사문 1등급" → {"탐구1": {"type": "등급", "value": 2, "과목명": "생활과윤리"}, "탐구2": {"type": "등급", "value": 1, "과목명": "사회문화"}}
+- "물1 지1 1등급" → {"탐구1": {"type": "등급", "value": 1, "과목명": "물리학1"}, "탐구2": {"type": "등급", "value": 1, "과목명": "지구과학1"}}
 
 target_range 옵션:
-- ["안정"]: 합격 확률 높은 대학/학과만, 일반적인 대학 추천 시, 안정적인 대학 추천 시 적용
-- ["적정"]: 합격 가능성 있는 대학/학과만, 일반적인 대학 추천 시 적용
-- ["상향"]: 도전적인 대학/학과만, 일반적인 대학 추천 시, 도전적인 대학 추천 시 적용
-- ["스나이핑"]: 최상위 목표 대학/학과만, 최상위 목표 대학 추천 시 적용
+- ["하향"]: 컷보다 1% 이상 높은 안전한 대학/학과만
+- ["안정"]: 컷 점수 이상인 합격 확률 높은 대학/학과만
+- ["적정"]: 컷보다 1% 낮음까지, 합격 가능성 있는 대학/학과만
+- ["상향"]: 컷보다 2% 낮음까지, 도전적인 대학/학과만
+- ["스나이핑"]: 컷보다 3% 낮음까지, 최상위 목표 대학/학과만
 - []: 빈 배열 = 모든 범위 (기본값), score가 주어지지 않으면 항상 빈 배열
-
+- 학생이 자기 성적만 입력한 경우 -> [적정, 안정, 상향]
 예시:
 - "나 11232인데 경희대 갈 수 있어?" → consult(scores, ["경희대학교"], [], [])
 - "11112로 기계공학 어디 갈까?" → consult(scores, [], ["기계공학"], [적정, 안정, 상향])
+- '내 성적 언매 99, 미적 100, 영어 1등급, 물1 85, 화2 93이야: -> consult(scores, [], [], [적정, 안정, 상향])
 - "적정 대학 추천해줘" → consult(scores, [], [], ["적정"])
 - "상향으로 서울대 연세대 가능해?" → consult(scores, ["서울대학교", "연세대학교"], [], ["상향"])
 
@@ -239,8 +249,23 @@ class RouterAgent:
         )
         self.generation_config = {
             "temperature": ROUTER_CONFIG["temperature"],
-            "max_output_tokens": ROUTER_CONFIG["max_output_tokens"]
+            "max_output_tokens": ROUTER_CONFIG["max_output_tokens"],
+            "response_mime_type": "application/json"  # JSON 출력 강제
         }
+    
+    def _clean_history_content(self, content: str) -> str:
+        """
+        히스토리에서 main_agent 스타일 마커 제거
+        Router가 main_agent 형식을 모방하지 않도록 방지
+        """
+        import re
+        # ===SECTION_START:xxx=== 및 ===SECTION_END=== 제거
+        content = re.sub(r'===SECTION_START[^=]*===\s*', '', content)
+        content = re.sub(r'===SECTION_END===\s*', '', content)
+        # <cite> 태그 제거 (내용은 유지)
+        content = re.sub(r'<cite[^>]*>', '', content)
+        content = re.sub(r'</cite>', '', content)
+        return content.strip()
     
     async def route(self, message: str, history: List[Dict] = None) -> Dict[str, Any]:
         """
@@ -249,13 +274,16 @@ class RouterAgent:
         Returns:
             {"function_calls": [{"function": str, "params": dict}]}
         """
-        # 히스토리 구성
+        # 히스토리 구성 (main_agent 스타일 마커 제거)
         gemini_history = []
         if history:
             for msg in history[-10:]:
                 role = "user" if msg.get("role") == "user" else "model"
                 content = msg.get("content", "")
                 if content:
+                    # main_agent 스타일 마커 제거
+                    if role == "model":
+                        content = self._clean_history_content(content)
                     gemini_history.append({"role": role, "parts": [content]})
         
         chat = self.model.start_chat(history=gemini_history)
