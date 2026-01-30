@@ -197,6 +197,66 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     return content
   }
 
+  // ___DIVIDER___ 마커를 <hr> 구분선으로 변환
+  const addSectionDividers = (content: React.ReactNode): React.ReactNode => {
+    if (typeof content === 'string') {
+      if (!content.includes('___DIVIDER___')) return content
+
+      const parts = content.split('___DIVIDER___')
+      const result: React.ReactNode[] = []
+
+      parts.forEach((part, idx) => {
+        if (idx > 0) {
+          result.push(
+            <hr
+              key={`divider-${idx}`}
+              className="hidden sm:block"
+              style={{
+                border: 'none',
+                borderTop: '1.2px solid #dddddd',
+                marginTop: '2.0em',
+                marginBottom: '0.1em'
+              }}
+            />
+          )
+        }
+        if (part) {
+          result.push(<span key={`section-${idx}`}>{part}</span>)
+        }
+      })
+
+      return result
+    }
+
+    // 배열인 경우 각 요소 재귀 처리
+    if (Array.isArray(content)) {
+      const result: React.ReactNode[] = []
+      content.forEach((node, idx) => {
+        const processed = addSectionDividers(node)
+        if (Array.isArray(processed)) {
+          result.push(...processed)
+        } else {
+          result.push(processed)
+        }
+      })
+      return result
+    }
+
+    // React 요소의 children 처리
+    if (content && typeof content === 'object' && 'props' in content) {
+      const element = content as React.ReactElement
+      if (element.props && element.props.children) {
+        const processedChildren = addSectionDividers(element.props.children)
+        // children이 변경된 경우 새 요소 반환
+        if (processedChildren !== element.props.children) {
+          return { ...element, props: { ...element.props, children: processedChildren } }
+        }
+      }
+    }
+
+    return content
+  }
+
   // cite 태그 개수 세기
   const countCiteTags = () => {
     const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
@@ -214,9 +274,12 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
       return <div className="whitespace-pre-wrap">{message}</div>
     }
 
-    // 1. 섹션 마커 제거 (백엔드에서 처리하지만, 혹시 남아있는 경우 대비)
-    let cleanedMessage = message.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
-    
+    // 1. 섹션 경계를 구분선 마커로 변환 (===SECTION_END=== ... ===SECTION_START=== → ___DIVIDER___)
+    let cleanedMessage = message.replace(/===SECTION_END===\s*===SECTION_START(?::\w+)?===/g, '___DIVIDER___')
+
+    // 남은 섹션 마커 제거 (맨 처음/끝에 있는 것들)
+    cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
+
     // 연속 줄바꿈 정리
     cleanedMessage = cleanedMessage.replace(/\n{3,}/g, '\n\n').trim()
 
@@ -306,7 +369,8 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
         )
       }
 
-      return <div className="whitespace-pre-wrap">{wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))}</div>
+      const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))
+      return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
     }
 
     // 기존 형식 처리 (하위 호환성)
@@ -318,7 +382,8 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     if (citeCount > 0 && sourcesCount === 0) {
       // cite 태그 제거하고 일반 텍스트로
       const finalClean = cleanedMessage.replace(/<\/?cite>/g, '')
-      return <div className="whitespace-pre-wrap">{parseTitles(finalClean)}</div>
+      const content = wrapBulletLines(parseTitles(finalClean))
+      return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
     }
 
     // 기존 <cite>...</cite> 패턴 찾기
@@ -388,7 +453,8 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
       )
     }
 
-    return <div className="whitespace-pre-wrap">{wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))}</div>
+    const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))
+    return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
   }
 
   return (
