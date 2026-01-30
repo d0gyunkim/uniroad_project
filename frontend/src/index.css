@@ -39,6 +39,13 @@ code {
   line-height: 1.8;
 }
 
+/* 불릿 포인트(•, -, *) 줄바꿈 시 들여쓰기 */
+.ai-response .bullet-line {
+  display: block;
+  padding-left: 1.2em;
+  text-indent: -1.2em;
+}
+
 .ai-response strong,
 .ai-response b {
   font-weight: 600;

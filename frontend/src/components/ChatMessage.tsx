@@ -166,6 +166,37 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     return parts.length > 0 ? parts : parseBold(text)
   }
 
+  // 불릿 포인트 라인을 감지해서 들여쓰기 스타일 적용
+  const wrapBulletLines = (content: React.ReactNode): React.ReactNode => {
+    if (typeof content === 'string') {
+      const lines = content.split('\n')
+      return lines.map((line, idx) => {
+        const isBullet = /^[\s]*[•\-\*]\s/.test(line)
+        if (isBullet) {
+          return (
+            <span key={idx} className="bullet-line">
+              {line}
+              {idx < lines.length - 1 && '\n'}
+            </span>
+          )
+        }
+        return idx < lines.length - 1 ? line + '\n' : line
+      })
+    }
+
+    // React 노드 배열인 경우
+    if (Array.isArray(content)) {
+      return content.map((node, idx) => {
+        if (typeof node === 'string') {
+          return wrapBulletLines(node)
+        }
+        return node
+      })
+    }
+
+    return content
+  }
+
   // cite 태그 개수 세기
   const countCiteTags = () => {
     const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
@@ -275,7 +306,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
         )
       }
 
-      return <div className="whitespace-pre-wrap">{parts.length > 0 ? parts : parseTitles(cleanedMessage)}</div>
+      return <div className="whitespace-pre-wrap">{wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))}</div>
     }
 
     // 기존 형식 처리 (하위 호환성)
@@ -357,7 +388,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
       )
     }
 
-    return <div className="whitespace-pre-wrap">{parts.length > 0 ? parts : parseTitles(cleanedMessage)}</div>
+    return <div className="whitespace-pre-wrap">{wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))}</div>
   }
 
   return (

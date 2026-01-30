@@ -51,7 +51,7 @@ export default function RollingPlaceholder({ onQuestionClick }: RollingPlacehold
   
   return (
     <div
-      className="relative w-1/2 mx-auto overflow-hidden"
+      className="relative w-full sm:w-1/2 mx-auto overflow-hidden"
       style={{ height: `${containerHeight}px` }}
     >
       {/* 그라데이션 마스크 */}

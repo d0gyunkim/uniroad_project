@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getLogs, clearLogs, updateLogEvaluation, ExecutionLog } from '../utils/adminLogger'
+import { 
+  getLogs, 
+  fetchLogs, 
+  clearLogs, 
+  updateLogEvaluation, 
+  migrateLocalStorageLogs,
+  hasLocalStorageLogs,
+  ExecutionLog 
+} from '../utils/adminLogger'
 
 // Admin Agent 평가 함수 (백그라운드에서 비동기 실행, 백엔드 API 호출)
 async function evaluateLog(log: ExecutionLog): Promise<void> {
@@ -27,7 +35,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
   if (!log.routerOutput) {
     evaluation.routerStatus = 'error'
     evaluation.routerComment = 'Router 출력이 없습니다'
-    updateLogEvaluation(log.id, evaluation)
+    await updateLogEvaluation(log.id, evaluation)
     return
   }
   
@@ -149,7 +157,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
     evaluation.answerComment = log.finalAnswer ? 'Function 결과 없음' : '답변 없음'
   }
   
-  updateLogEvaluation(log.id, evaluation)
+  await updateLogEvaluation(log.id, evaluation)
 }
 
 // 상태 색상 반환
@@ -274,12 +282,23 @@ function ExpandableCell({ content, maxLength = 30, cleanRouter = false, isExpand
 export default function AdminAgentPage() {
   const navigate = useNavigate()
   const [logs, setLogs] = useState<ExecutionLog[]>([])
+  const [loading, setLoading] = useState(true)
   const [evaluatingIds, setEvaluatingIds] = useState<Set<string>>(new Set())
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [showMigrateBanner, setShowMigrateBanner] = useState(false)
+  const [migrating, setMigrating] = useState(false)
 
-  // 로그 로드
-  const loadLogs = useCallback(() => {
-    setLogs(getLogs())
+  // 로그 로드 (Supabase에서)
+  const loadLogs = useCallback(async () => {
+    setLoading(true)
+    try {
+      const fetchedLogs = await fetchLogs()
+      setLogs(fetchedLogs)
+    } catch (error) {
+      console.error('로그 로드 오류:', error)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   // pending 로그 자동 평가
@@ -296,24 +315,48 @@ export default function AdminAgentPage() {
           next.delete(log.id)
           return next
         })
-        loadLogs()
+        // 캐시 업데이트 후 상태 반영
+        setLogs(getLogs())
       })
     }
-  }, [evaluatingIds, loadLogs])
+  }, [evaluatingIds])
+
+  // 마이그레이션 처리
+  const handleMigrate = async () => {
+    setMigrating(true)
+    try {
+      const result = await migrateLocalStorageLogs()
+      if (result.migrated > 0) {
+        alert(`${result.migrated}개의 로그가 마이그레이션되었습니다.`)
+        await loadLogs()
+      }
+      setShowMigrateBanner(false)
+    } catch (error) {
+      alert('마이그레이션 중 오류가 발생했습니다.')
+    } finally {
+      setMigrating(false)
+    }
+  }
 
   // 초기 로드 및 이벤트 리스너
   useEffect(() => {
-    const initialLogs = getLogs()
-    setLogs(initialLogs)
-    
-    // 초기 로드 시 pending 로그 자동 평가
-    evaluatePendingLogs(initialLogs)
+    // localStorage에 미마이그레이션 로그가 있는지 확인
+    if (hasLocalStorageLogs()) {
+      setShowMigrateBanner(true)
+    }
+
+    // Supabase에서 로그 로드
+    loadLogs().then(() => {
+      const cached = getLogs()
+      evaluatePendingLogs(cached)
+    })
     
     // 실시간 업데이트 리스너
-    const handleLogUpdated = (e: CustomEvent) => {
-      loadLogs()
+    const handleLogUpdated = async (e: CustomEvent) => {
       // 새 로그 자동 평가
       const newLog = e.detail as ExecutionLog
+      setLogs(getLogs())
+      
       if (!evaluatingIds.has(newLog.id)) {
         setEvaluatingIds(prev => new Set([...prev, newLog.id]))
         evaluateLog(newLog).finally(() => {
@@ -322,12 +365,12 @@ export default function AdminAgentPage() {
             next.delete(newLog.id)
             return next
           })
-          loadLogs()
+          setLogs(getLogs())
         })
       }
     }
     
-    const handleLogEvaluated = () => loadLogs()
+    const handleLogEvaluated = () => setLogs(getLogs())
     const handleLogCleared = () => setLogs([])
     
     window.addEventListener('admin-log-updated', handleLogUpdated as EventListener)
@@ -339,7 +382,7 @@ export default function AdminAgentPage() {
       window.removeEventListener('admin-log-evaluated', handleLogEvaluated)
       window.removeEventListener('admin-log-cleared', handleLogCleared)
     }
-  }, [loadLogs, evaluatingIds])
+  }, [loadLogs, evaluatingIds, evaluatePendingLogs])
 
   // 수동 평가 재실행
   const handleReEvaluate = async (log: ExecutionLog) => {
@@ -352,11 +395,50 @@ export default function AdminAgentPage() {
       next.delete(log.id)
       return next
     })
-    loadLogs()
+    setLogs(getLogs())
+  }
+
+  // 전체 삭제 핸들러
+  const handleClearLogs = async () => {
+    if (confirm('모든 로그를 삭제하시겠습니까?')) {
+      await clearLogs()
+      setLogs([])
+    }
   }
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* 마이그레이션 배너 */}
+      {showMigrateBanner && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3">
+          <div className="flex items-center justify-between max-w-full mx-auto">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className="text-sm text-yellow-800">
+                기존 브라우저에 저장된 로그가 있습니다. Supabase로 마이그레이션하시겠습니까?
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleMigrate}
+                disabled={migrating}
+                className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-sm disabled:opacity-50"
+              >
+                {migrating ? '마이그레이션 중...' : '마이그레이션'}
+              </button>
+              <button
+                onClick={() => setShowMigrateBanner(false)}
+                className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-sm"
+              >
+                나중에
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 */}
       <header className="bg-white shadow-sm sticky top-0 z-10">
         <div className="max-w-full mx-auto px-4 py-4 flex justify-between items-center">
@@ -376,16 +458,13 @@ export default function AdminAgentPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={loadLogs}
-              className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm"
+              disabled={loading}
+              className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm disabled:opacity-50"
             >
-              새로고침
+              {loading ? '로딩...' : '새로고침'}
             </button>
             <button
-              onClick={() => {
-                if (confirm('모든 로그를 삭제하시겠습니까?')) {
-                  clearLogs()
-                }
-              }}
+              onClick={handleClearLogs}
               className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors text-sm"
             >
               전체 삭제
@@ -396,7 +475,12 @@ export default function AdminAgentPage() {
 
       {/* 테이블 */}
       <div className="p-4 overflow-x-auto">
-        {logs.length === 0 ? (
+        {loading && logs.length === 0 ? (
+          <div className="text-center py-20">
+            <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p className="text-gray-500">로그를 불러오는 중...</p>
+          </div>
+        ) : logs.length === 0 ? (
           <div className="text-center py-20">
             <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -408,7 +492,7 @@ export default function AdminAgentPage() {
           <table className="w-full bg-white rounded-lg shadow-sm border border-gray-200 table-fixed">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '60px'}}>ID</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '80px'}}>ID/User</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '80px'}}>이전 대화</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '120px'}}>사용자 질문</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '140px'}}>Router 출력</th>
@@ -444,9 +528,12 @@ export default function AdminAgentPage() {
                     }}
                     className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${index % 2 === 0 ? '' : 'bg-gray-25'}`}
                   >
-                    {/* ID */}
+                    {/* ID/User - 두 줄로 표시 */}
                     <td className="px-2 py-1.5 align-middle">
-                      <div className="text-[10px] text-gray-500 font-mono">{log.id.substring(4, 17)}</div>
+                      <div className="text-[10px] text-gray-700 font-mono font-semibold">{log.id}</div>
+                      <div className="text-[9px] text-gray-400 truncate" title={log.userId || '비회원'}>
+                        {log.userId ? log.userId.substring(0, 8) + '...' : '비회원'}
+                      </div>
                       <div className="text-[9px] text-gray-400">
                         {new Date(log.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
                       </div>

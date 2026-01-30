@@ -163,6 +163,35 @@ export default function ChatPage() {
     }
   }, [isAuthenticated])
 
+  // 모바일 화면 복귀 시 채팅 상태 유지 (sessionStorage 활용)
+  useEffect(() => {
+    // 메시지가 있으면 sessionStorage에 저장
+    if (messages.length > 0) {
+      sessionStorage.setItem('uniroad_chat_messages', JSON.stringify(messages))
+      sessionStorage.setItem('uniroad_chat_session_id', sessionId)
+    }
+  }, [messages, sessionId])
+
+  // 초기 로드 시 sessionStorage에서 메시지 복구 (비로그인 또는 새로고침 시)
+  useEffect(() => {
+    const savedChatMessages = sessionStorage.getItem('uniroad_chat_messages')
+    const savedSessionId = sessionStorage.getItem('uniroad_chat_session_id')
+
+    if (savedChatMessages && messages.length === 0 && !currentSessionId) {
+      try {
+        const parsed = JSON.parse(savedChatMessages)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed)
+          if (savedSessionId) {
+            setSessionId(savedSessionId)
+          }
+        }
+      } catch (e) {
+        console.error('채팅 메시지 복구 실패:', e)
+      }
+    }
+  }, [])
+
   // savedMessages가 변경되면 로컬 messages 상태에 동기화
   useEffect(() => {
     console.log('🔄 [ChatPage] savedMessages 변경 감지:', {
@@ -539,6 +568,7 @@ export default function ChatPage() {
 
     try {
       let firstLogReceived = false
+      let firstChunkReceived = false
       
       await sendMessageStream(
         userInput,
@@ -628,22 +658,20 @@ export default function ChatPage() {
           timingLogger.printSummary()
           timingLogger.logToLocalStorage()
           
-          // Admin 로그 저장 (관리자인 경우)
-          if (user?.name === '김도균') {
-            const elapsedMs = response.metadata?.timing?.total_time 
-              ? response.metadata.timing.total_time * 1000 
-              : Date.now() - parseInt(userMessage.id)
-            
-            addLog({
-              conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
-              userQuestion: userInput,
-              routerOutput: response.router_output || null,
-              functionResult: response.function_results || null,
-              finalAnswer: response.response,
-              elapsedTime: elapsedMs,
-              timing: response.metadata?.timing || undefined,
-            })
-          }
+          // 실행 로그 저장 (모든 사용자)
+          const elapsedMs = response.metadata?.timing?.total_time 
+            ? response.metadata.timing.total_time * 1000 
+            : Date.now() - parseInt(userMessage.id)
+          
+          void addLog({
+            conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
+            userQuestion: userInput,
+            routerOutput: response.router_output || null,
+            functionResult: response.function_results || null,
+            finalAnswer: response.response,
+            elapsedTime: elapsedMs,
+            timing: response.metadata?.timing || undefined,
+          })
         },
         // 에러 콜백
         (error: string) => {
@@ -662,6 +690,13 @@ export default function ChatPage() {
         (chunk: string) => {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
+          
+          // 첫 청크가 오면 생각하는 과정 즉시 숨김
+          if (!firstChunkReceived) {
+            firstChunkReceived = true
+            setCurrentLog('')
+            setIsLoading(false)
+          }
           
           // 스트리밍 봇 메시지에 청크 추가
           setMessages((prev) => prev.map(msg => 
@@ -723,7 +758,7 @@ export default function ChatPage() {
           (response: ChatResponse) => {
             const elapsedMs = Date.now() - startTime
             
-            addLog({
+            void addLog({
               conversationHistory: [],
               userQuestion: `[추가실행 ${runIndex + 2}] ${question}`,
               routerOutput: response.router_output || null,
@@ -737,7 +772,7 @@ export default function ChatPage() {
           },
           // 에러 콜백
           (error: string) => {
-            addLog({
+            void addLog({
               conversationHistory: [],
               userQuestion: `[추가실행 ${runIndex + 2}] ${question}`,
               routerOutput: { error },
@@ -805,26 +840,30 @@ export default function ChatPage() {
             </button>
           </div>
 
-          {/* 1. 새 채팅 버튼 (로그인한 경우에만 표시) */}
-          {isAuthenticated && (
-            <div className="px-4 sm:px-6 pt-16 pb-2">
-              <button
-                onClick={handleNewChat}
-                className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
-              >
-                <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-                <span className="text-sm font-medium text-left">새 채팅</span>
-              </button>
-            </div>
-          )}
+          {/* 1. 새 채팅 버튼 (로그인/비로그인 모두 표시) */}
+          <div className="px-4 sm:px-6 pt-16 pb-2">
+            <button
+              onClick={() => {
+                handleNewChat()
+                // 모바일에서는 사이드바 자동 닫기
+                if (window.innerWidth < 640) {
+                  setIsSideNavOpen(false)
+                }
+              }}
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
+            >
+              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              <span className="text-sm font-medium text-left">새 채팅</span>
+            </button>
+          </div>
 
           {/* 2. 공지사항 (드롭다운) */}
           <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsAnnouncementDropdownOpen(!isAnnouncementDropdownOpen)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
             >
               <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -854,7 +893,7 @@ export default function ChatPage() {
                           setIsAnnouncementModalOpen(false)
                           setTimeout(() => setIsAnnouncementModalOpen(true), 0)
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
                       >
                         <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
                           announcement.is_pinned ? 'bg-red-500' : 'border-2 border-gray-300'
@@ -928,7 +967,7 @@ export default function ChatPage() {
           <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsOpenChatModalOpen(true)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
             >
               <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
@@ -941,7 +980,7 @@ export default function ChatPage() {
           <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsRecordDropdownOpen(!isRecordDropdownOpen)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
             >
               <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -961,7 +1000,7 @@ export default function ChatPage() {
             {isRecordDropdownOpen && (
               <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4">
                 {/* 내 생활기록부 관리 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group">
                   <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
                   </div>
                   <div className="flex-1 min-w-0">
@@ -971,7 +1010,7 @@ export default function ChatPage() {
                 </button>
 
                 {/* 3월 6월 9월 모의고사 성적 입력 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group">
                   <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
                   </div>
                   <div className="flex-1 min-w-0">
@@ -981,7 +1020,7 @@ export default function ChatPage() {
                 </button>
 
                 {/* 내신 성적 입력 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group">
                   <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1059,12 +1098,18 @@ export default function ChatPage() {
                       className={`w-full px-3 py-2 rounded-lg transition-colors flex items-center justify-between group ${
                         currentSessionId === session.id
                           ? 'text-gray-900'
-                          : 'hover:bg-gray-50 text-gray-900'
+                          : 'hover:bg-[#DEE2E6] text-gray-900'
                       }`}
-                      style={currentSessionId === session.id ? { backgroundColor: '#DCE4F2' } : undefined}
+                      style={currentSessionId === session.id ? { backgroundColor: '#DBE4F6' } : undefined}
                     >
                       <button
-                        onClick={() => selectSession(session.id)}
+                        onClick={() => {
+                          selectSession(session.id)
+                          // 모바일에서는 사이드바 자동 닫기
+                          if (window.innerWidth < 640) {
+                            setIsSideNavOpen(false)
+                          }
+                        }}
                         className="flex-1 text-left min-w-0"
                       >
                         <p className="text-xs font-medium truncate">{session.title}</p>
@@ -1135,6 +1180,14 @@ export default function ChatPage() {
         </div>
       </div>
 
+      {/* 모바일 오버레이 - 사이드바 바깥 클릭 시 닫기 */}
+      {isSideNavOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40 sm:hidden"
+          onClick={() => setIsSideNavOpen(false)}
+        />
+      )}
+
       {/* 메인 채팅 영역 */}
       <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${
         isSideNavOpen ? 'sm:ml-80' : 'sm:ml-0'
@@ -1154,7 +1207,12 @@ export default function ChatPage() {
               </svg>
             </button>
             )}
-              <img src="/로고.png" alt="UniZ Logo" className="h-8" />
+              <img
+                src="/로고.png"
+                alt="UniZ Logo"
+                className="h-8 cursor-pointer"
+                onClick={handleNewChat}
+              />
             </div>
             
             {isAuthenticated ? (
@@ -1193,7 +1251,12 @@ export default function ChatPage() {
                   </svg>
                 </button>
               )}
-              <img src="/로고.png" alt="UniZ Logo" className="h-10" />
+              <img
+                src="/로고.png"
+                alt="UniZ Logo"
+                className="h-10 cursor-pointer"
+                onClick={handleNewChat}
+              />
             </div>
             
             <div className="flex items-center gap-3">
@@ -1316,14 +1379,14 @@ export default function ChatPage() {
         </header>
 
         {/* 채팅 영역 */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 pb-16">
+        <div className="flex-1 overflow-y-auto px-[17px] sm:px-6 py-4 pb-16">
           <div className="max-w-[800px] mx-auto">
             {messages.length === 0 ? (
-              <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-center">
-                {/* 중앙 영역: 인사말 + 채팅창 + 애니메이션 */}
-                <div className="w-full" style={{ marginTop: '64px' }}>
+              <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-between sm:justify-center">
+                {/* 상단 영역: 인사말 + 애니메이션 (모바일) / 인사말 + 채팅창 + 애니메이션 (데스크톱) */}
+                <div className="w-full flex-1 flex flex-col justify-center sm:flex-none" style={{ marginTop: '32px' }}>
                   {/* 인사말 */}
-                  <div className="text-center mb-6">
+                  <div className="text-center mb-6 sm:mb-6">
                     <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
                       {isAuthenticated && user?.name ? (
                         <>안녕하세요 {user.name}님! 👋</>
@@ -1335,10 +1398,9 @@ export default function ChatPage() {
                       무엇을 도와드릴까요?
                     </p>
                   </div>
-                  
-                  {/* 채팅창 */}
-                  <div className="w-full flex items-center gap-2">
-                    {/* 입력 필드 */}
+
+                  {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
+                  <div className="hidden sm:flex w-full items-center gap-2 mb-16">
                     <div className="flex-1 relative">
                       <textarea
                         value={input}
@@ -1353,10 +1415,7 @@ export default function ChatPage() {
                         disabled={isLoading}
                         rows={1}
                         className="w-full px-4 py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{
-                          height: 'auto',
-                          minHeight: '64px',
-                        }}
+                        style={{ height: 'auto', minHeight: '64px' }}
                         onInput={(e) => {
                           const target = e.target as HTMLTextAreaElement
                           target.style.height = 'auto'
@@ -1364,27 +1423,61 @@ export default function ChatPage() {
                         }}
                       />
                     </div>
-                    
-                    {/* 전송 버튼 */}
                     <button
                       onClick={() => handleSend()}
                       disabled={isLoading || !input.trim()}
                       className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                     >
-                      <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                       </svg>
                     </button>
                   </div>
-                  
-                  {/* 롤링 플레이스홀더 애니메이션 - 채팅창 바로 아래 64px */}
-                  <div className="w-full" style={{ marginTop: '64px' }}>
-                    <RollingPlaceholder 
+
+                  {/* 롤링 플레이스홀더 애니메이션 */}
+                  <div className="w-full mt-4 sm:mt-0">
+                    <RollingPlaceholder
                       onQuestionClick={(question) => {
-                        // 클릭한 질문으로 바로 채팅 시작
                         handleSend(question)
                       }}
                     />
+                  </div>
+                </div>
+
+                {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
+                <div className="sm:hidden w-full pb-0 mt-4">
+                  <div className="w-full flex items-center gap-2">
+                    <div className="flex-1 relative">
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            handleSend()
+                          }
+                        }}
+                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        disabled={isLoading}
+                        rows={1}
+                        className="w-full px-4 py-3 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto' }}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement
+                          target.style.height = 'auto'
+                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                        }}
+                      />
+                    </div>
+                    <button
+                      onClick={() => handleSend()}
+                      disabled={isLoading || !input.trim()}
+                      className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1428,7 +1521,7 @@ export default function ChatPage() {
 
         {/* 입력 영역 - 고정 (메시지가 있을 때만 표시) */}
         {messages.length > 0 && (
-          <div className="bg-white sticky" style={{ bottom: '40px' }}>
+          <div className="bg-white sticky bottom-0 sm:bottom-[40px]">
             <div className="px-4 sm:px-6 py-2">
               <div className="max-w-[800px] mx-auto flex items-center gap-2">
                 {/* 입력 필드 */}
@@ -1445,10 +1538,9 @@ export default function ChatPage() {
                     placeholder="유니로드에게 무엇이든 물어보세요"
                 disabled={isLoading}
                     rows={1}
-                    className="w-full px-4 py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                    className="w-full px-4 py-3 sm:py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] sm:min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
                     style={{
                       height: 'auto',
-                      minHeight: '64px',
                     }}
                     onInput={(e) => {
                       const target = e.target as HTMLTextAreaElement
@@ -1662,7 +1754,7 @@ export default function ChatPage() {
                         setIsAnnouncementModalOpen(false)
                         setEditingAnnouncementId(null)
                       }}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-[#DEE2E6] transition-colors"
                     >
                       취소
                     </button>
