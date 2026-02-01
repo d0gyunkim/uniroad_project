@@ -418,3 +418,49 @@ export const deleteAgent = async (agentName: string): Promise<void> => {
 export const resetSession = async (sessionId: string): Promise<void> => {
   await api.post(`/chat/reset?session_id=${sessionId}`)
 }
+
+// ============================================================
+// 프로필 API
+// ============================================================
+
+export interface ScoreEntry {
+  등급?: number
+  표준점수?: number
+  백분위?: number
+  선택과목?: string  // 모든 과목의 선택과목
+}
+
+export interface UserProfile {
+  user_id: string
+  scores: Record<string, ScoreEntry>
+  created_at: string
+  updated_at: string
+}
+
+// 프로필 조회
+export const getProfile = async (token: string): Promise<UserProfile> => {
+  const response = await api.get<UserProfile>('/profile/me', {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return response.data
+}
+
+// 프로필 저장/수정
+export const saveProfile = async (
+  token: string,
+  scores: Record<string, ScoreEntry>
+): Promise<UserProfile> => {
+  const response = await api.post<UserProfile>(
+    '/profile/me',
+    { scores },
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  return response.data
+}
+
+// 프로필 삭제
+export const deleteProfile = async (token: string): Promise<void> => {
+  await api.delete('/profile/me', {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+}

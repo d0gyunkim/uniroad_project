@@ -4,19 +4,21 @@ echo "🚀 유니로드 서버 시작"
 echo "="
 echo ""
 
-# 터미널 창 2개로 실행
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 터미널 창으로 실행
 if command -v osascript &> /dev/null; then
     # macOS
-    echo "📱 macOS 감지 - 터미널 2개 자동 실행"
+    echo "📱 macOS 감지 - 터미널 3개 자동 실행"
     
     # 백엔드 터미널
     osascript -e 'tell application "Terminal"
-        do script "cd \"'$(pwd)'/backend\" && python3 main.py"
+        do script "cd \"'$PROJECT_DIR'/backend\" && python3 main.py"
     end tell'
     
-    # 프론트엔드 터미널
+    # 프론트엔드 터미널 (본 프로젝트)
     osascript -e 'tell application "Terminal"
-        do script "cd \"'$(pwd)'/frontend\" && npm run dev"
+        do script "cd \"'$PROJECT_DIR'/frontend\" && npm run dev"
     end tell'
     
     echo "✅ 서버 시작 완료!"
@@ -30,12 +32,12 @@ else
     echo "⚠️  수동으로 2개 터미널에서 실행하세요:"
     echo ""
     echo "터미널 1 (백엔드):"
-    echo "  cd backend"
+    echo "  cd $PROJECT_DIR/backend"
     echo "  python3 main.py"
     echo ""
-    echo "터미널 2 (프론트엔드):"
-    echo "  cd frontend"
-    echo "  npm run dev"
+    echo "터미널 2 (수능 계산기):"
+    echo "  cd $PROJECT_DIR/suneung-calculator"
+    echo "  python3 -m http.server 8080"
 fi
 
 echo ""

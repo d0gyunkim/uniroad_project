@@ -317,12 +317,12 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
             
             elif func_name == "consult":
                 # Score System 통합: 성적 정규화 및 대학별 환산
+                # v2.0: suneung_calculator 사용 (86개 대학, 2158개 학과 지원)
                 from services.multi_agent.score_system import (
                     normalize_scores_from_extracted,
                     format_for_prompt,
-                    get_univ_converted_sections,
+                    run_reverse_search,
                 )
-                from services.multi_agent.score_system.search_engine import run_reverse_search
                 
                 # 토큰 추정 함수
                 def estimate_tokens(text: str) -> int:
@@ -349,20 +349,25 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                 normalized = normalize_scores_from_extracted(converted_scores)
                 score_text = format_for_prompt(normalized)
                 
-                # 3. 대학별 환산점수 계산
+                # 3. 파라미터 추출
                 target_univ = params.get("target_univ", []) or []
                 target_major = params.get("target_major", []) or []
                 target_range = params.get("target_range", []) or []
-                univ_sections = get_univ_converted_sections(normalized, target_univ)
                 
-                # 4. 리버스 서치 (target_univ가 비어있거나 "어디 갈 수 있어?" 질문 시)
+                # 4. 리버스 서치 (86개 대학, 2158개 학과 지원)
+                # 새로운 판정 기준: 안정, 적정, 소신, 도전, 어려움
                 reverse_results = []
                 user_message = params.get("user_message", "") or params.get("query", "")
-                run_reverse = not target_univ or "어디 갈 수 있어" in user_message
+                run_reverse = True  # 항상 리버스 서치 실행 (86개 대학 전체)
                 
                 if run_reverse:
                     try:
-                        reverse_results = run_reverse_search(normalized, target_range)
+                        reverse_results = run_reverse_search(
+                            normalized_scores=normalized,
+                            target_range=target_range,
+                            target_univ=target_univ if target_univ else None,
+                            target_major=target_major if target_major else None,
+                        )
                     except Exception as e:
                         print(f"⚠️ 리버스 서치 오류: {e}")
                 
@@ -372,8 +377,6 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                 
                 # 청크 1: 성적 분석 (score_conversion)
                 score_content = f"**학생 성적 분석**\n{score_text}"
-                if univ_sections:
-                    score_content += f"\n\n**대학별 환산점수**\n{univ_sections}"
                 
                 score_tokens = estimate_tokens(score_content)
                 if score_tokens <= CONSULT_TOKEN_LIMIT:
@@ -400,9 +403,9 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                     total_tokens = CONSULT_TOKEN_LIMIT
                 
                 # 청크 2: 리버스 서치 결과 (admission_results)
+                # 새로운 테이블 형식: 대학 | 학과 | 군 | 계열 | 내 점수 | 안정컷 | 적정컷 | 소신컷 | 도전컷 | 판정
                 if reverse_results:
-                    # 표 헤더
-                    table_header = "**지원 가능 대학 분석**\n| 대학 | 학과 | 전형 | 계열 | 70% 컷 | 내 점수 | 판정 | 모집 | 경쟁률 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+                    table_header = "**지원 가능 대학 분석 (86개 대학, 2158개 학과)**\n| 대학 | 학과 | 군 | 계열 | 내 점수 | 안정컷 | 적정컷 | 소신컷 | 도전컷 | 판정 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
                     table_rows = []
                     
                     remaining_tokens = CONSULT_TOKEN_LIMIT - total_tokens
@@ -410,16 +413,17 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                     current_tokens = header_tokens
                     
                     for r in reverse_results:
-                        row = "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                        row = "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                             r.get("univ", ""),
                             r.get("major", ""),
-                            r.get("type", ""),
-                            r.get("field", ""),
-                            r.get("cut_70_score", ""),
+                            r.get("gun", ""),
+                            r.get("track", "") or r.get("field", ""),
                             r.get("my_score", ""),
+                            r.get("safe_score", "") if r.get("safe_score") else "—",
+                            r.get("appropriate_score", "") if r.get("appropriate_score") else "—",
+                            r.get("expected_score", "") if r.get("expected_score") else "—",
+                            r.get("challenge_score", "") if r.get("challenge_score") else "—",
                             r.get("판정", ""),
-                            r.get("recruit_count") if r.get("recruit_count") is not None else "—",
-                            r.get("competition_rate") if r.get("competition_rate") is not None else "—",
                         )
                         row_tokens = estimate_tokens(row)
                         
@@ -444,7 +448,7 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                 # 출처 정보
                 document_titles = {
                     "score_conversion": "2026 수능 표준점수 및 백분위 산출 방식",
-                    "admission_results": "2025학년도 대입 전형결과"
+                    "admission_results": "2026학년도 정시 배치표 (86개 대학)"
                 }
                 document_urls = {
                     "score_conversion": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf",
@@ -460,7 +464,9 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                     "document_urls": document_urls,
                     "target_univ": target_univ,
                     "target_major": target_major,
-                    "total_tokens": total_tokens
+                    "total_tokens": total_tokens,
+                    "total_universities": 86,
+                    "total_departments": len(reverse_results),
                 }
             
             else:

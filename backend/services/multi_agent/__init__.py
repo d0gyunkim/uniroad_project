@@ -19,19 +19,25 @@ AVAILABLE_AGENTS = [
 ]
 
 
-async def run_orchestration_agent(message: str, history: List[Dict] = None, timing_logger=None) -> Dict[str, Any]:
+async def run_orchestration_agent(message: str, history: List[Dict] = None, timing_logger=None, user_id: str = None) -> Dict[str, Any]:
     """
     Orchestration Agent 실행 (router_agent 래퍼)
     - 기존 chat.py 호환 유지
     - Router → Functions → Main Agent 파이프라인 실행
+    
+    Args:
+        message: 사용자 질문
+        history: 대화 히스토리
+        timing_logger: 타이밍 로거 (optional)
+        user_id: 사용자 ID (프로필 점수 자동 보완용, optional)
     """
     timing = {"router": 0, "function": 0, "main_agent": 0}
     
     try:
-        # 1. router_agent 호출
+        # 1. router_agent 호출 (user_id 전달)
         print("🔄 [1/3] Router Agent 호출 중...")
         router_start = time.time()
-        result = await route_query(message, history)
+        result = await route_query(message, history, user_id=user_id)
         timing["router"] = round((time.time() - router_start) * 1000)  # ms
         
         # function_calls 추출
@@ -110,11 +116,17 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
         }
 
 
-def run_orchestration_agent_stream(message: str, history: List[Dict] = None, timing_logger=None):
+def run_orchestration_agent_stream(message: str, history: List[Dict] = None, timing_logger=None, user_id: str = None):
     """
     Orchestration Agent 실행 (스트리밍 버전)
     - Router → Functions 후 Main Agent 응답을 스트리밍
     - Generator를 반환 (각 청크는 dict 형태)
+    
+    Args:
+        message: 사용자 질문
+        history: 대화 히스토리
+        timing_logger: 타이밍 로거 (optional)
+        user_id: 사용자 ID (프로필 점수 자동 보완용, optional)
     
     Yields:
         {"type": "status", "step": str, "message": str, "detail": dict}  # 상태 업데이트
@@ -126,7 +138,7 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
     timing = {"router": 0, "function": 0, "main_agent": 0}
     
     try:
-        # 1. Router Agent 호출 (동기적으로 실행)
+        # 1. Router Agent 호출 (동기적으로 실행, user_id 전달)
         yield {"type": "status", "step": "router", "message": "🔄 [1/3] Router Agent 호출 중..."}
         
         router_start = time.time()
@@ -134,7 +146,7 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(route_query(message, history))
+            result = loop.run_until_complete(route_query(message, history, user_id=user_id))
         finally:
             loop.close()
         

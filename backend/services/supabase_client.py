@@ -315,6 +315,63 @@ class SupabaseService:
         except Exception as e:
             print(f"❌ 채팅 로그 저장 오류: {e}")
             return False
+    
+    @classmethod
+    async def get_user_profile(cls, user_id: str) -> Optional[dict]:
+        """사용자 프로필 조회"""
+        client = cls.get_client()
+        
+        try:
+            response = client.table('user_profiles')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ 프로필 조회 오류: {e}")
+            return None
+    
+    @classmethod
+    async def upsert_user_profile(cls, user_id: str, scores: dict) -> bool:
+        """사용자 프로필 생성/수정 (upsert)"""
+        client = cls.get_client()
+        
+        try:
+            # upsert: user_id가 있으면 update, 없으면 insert
+            response = client.table('user_profiles')\
+                .upsert({
+                    'user_id': user_id,
+                    'scores': scores
+                })\
+                .execute()
+            
+            print(f"✅ 프로필 저장 완료: user_id={user_id}")
+            return True
+        except Exception as e:
+            print(f"❌ 프로필 저장 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    @classmethod
+    async def delete_user_profile(cls, user_id: str) -> bool:
+        """사용자 프로필 삭제"""
+        client = cls.get_client()
+        
+        try:
+            response = client.table('user_profiles')\
+                .delete()\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            print(f"✅ 프로필 삭제 완료: user_id={user_id}")
+            return True
+        except Exception as e:
+            print(f"❌ 프로필 삭제 오류: {e}")
+            return False
 
 
 # 전역 인스턴스

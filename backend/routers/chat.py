@@ -129,6 +129,19 @@ async def chat(request: ChatRequest):
             else:
                 conversation_sessions[session_id] = []
         history = conversation_sessions[session_id][-20:]
+        
+        # 세션에서 user_id 조회 (프로필 점수 활용용)
+        user_id = None
+        if session_id and session_id != "default":
+            try:
+                session_response = supabase_service.client.table("chat_sessions")\
+                    .select("user_id")\
+                    .eq("id", session_id)\
+                    .execute()
+                if session_response.data and len(session_response.data) > 0:
+                    user_id = session_response.data[0].get("user_id")
+            except Exception as e:
+                log_and_emit(f"⚠️ 세션 user_id 조회 실패 (무시): {e}")
 
         # ========================================
         # 1단계: Orchestration Agent
@@ -147,7 +160,7 @@ async def chat(request: ChatRequest):
         final_agent.set_log_callback(log_and_emit)
         
         orch_start = time.time()
-        orchestration_result = await run_orchestration_agent(message, history)
+        orchestration_result = await run_orchestration_agent(message, history, user_id=user_id)
         orch_time = time.time() - orch_start
 
         if "error" in orchestration_result:
@@ -673,6 +686,19 @@ async def chat_stream_v2(request: ChatRequest):
             conversation_sessions[session_id] = []
         history = conversation_sessions[session_id][-20:]
         
+        # 세션에서 user_id 조회 (프로필 점수 활용용)
+        user_id = None
+        if session_id and session_id != "default":
+            try:
+                session_response = supabase_service.client.table("chat_sessions")\
+                    .select("user_id")\
+                    .eq("id", session_id)\
+                    .execute()
+                if session_response.data and len(session_response.data) > 0:
+                    user_id = session_response.data[0].get("user_id")
+            except Exception as e:
+                print(f"⚠️ 세션 user_id 조회 실패 (무시): {e}")
+        
         full_response = ""
         timing = {}
         function_results = {}
@@ -682,8 +708,8 @@ async def chat_stream_v2(request: ChatRequest):
         used_chunks = []
         
         try:
-            # 스트리밍 파이프라인 실행
-            for event in run_orchestration_agent_stream(message, history):
+            # 스트리밍 파이프라인 실행 (user_id 전달)
+            for event in run_orchestration_agent_stream(message, history, user_id=user_id):
                 event_type = event.get("type")
                 
                 if event_type == "status":
@@ -842,6 +868,19 @@ async def chat_stream(request: ChatRequest):
                     conversation_sessions[session_id] = []
             history = conversation_sessions[session_id][-20:]
             timing_logger.mark("history_loaded")
+            
+            # 세션에서 user_id 조회 (프로필 점수 활용용)
+            user_id = None
+            if session_id and session_id != "default":
+                try:
+                    session_response = supabase_service.client.table("chat_sessions")\
+                        .select("user_id")\
+                        .eq("id", session_id)\
+                        .execute()
+                    if session_response.data and len(session_response.data) > 0:
+                        user_id = session_response.data[0].get("user_id")
+                except Exception as e:
+                    yield send_log(f"⚠️ 세션 user_id 조회 실패 (무시): {e}")
 
             # ========================================
             # 1단계: Orchestration Agent
@@ -859,12 +898,12 @@ async def chat_stream(request: ChatRequest):
             sub_agents.set_log_callback(log_callback)
             final_agent.set_log_callback(log_callback)
             
-            # Orchestration Agent 실행 (백그라운드)
+            # Orchestration Agent 실행 (백그라운드, user_id 전달)
             orch_start = time.time()
             timing_logger.mark("orch_start", orch_start)
             
             async def run_orch():
-                return await run_orchestration_agent(message, history, timing_logger)
+                return await run_orchestration_agent(message, history, timing_logger, user_id=user_id)
             
             orch_task = asyncio.create_task(run_orch())
             
