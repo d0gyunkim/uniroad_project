@@ -1,16 +1,32 @@
 """
 Application Layer: 성적 전처리 및 프롬프트 생성
 LLM의 Function Calling 결과를 처리하고 컨설팅 프롬프트를 생성합니다.
+
+v2.0 변경사항:
+- 개별 대학 계산기 (khu, korea, sogang, snu, yonsei) → suneung_calculator로 통합
+- 86개 대학, 2158개 학과 지원
+- 새로운 판정 기준: 안정/적정/소신/도전/어려움
 """
 from typing import Dict, Any, Optional, Callable
 
 from .converter import ScoreConverter
-from .calculators.khu import calculate_khu_score
-from .calculators.korea import calculate_korea_score
-from .calculators.sogang import calculate_sogang_score
-from .calculators.snu import calculate_snu_score
-from .calculators.yonsei import calculate_yonsei_score
 from .search_engine import run_reverse_search
+
+# [DEPRECATED] 기존 개별 대학 계산기 - 하위 호환성을 위해 유지
+# 새로운 코드는 suneung_calculator.run_suneung_search()를 사용하세요
+try:
+    from .calculators.khu import calculate_khu_score
+    from .calculators.korea import calculate_korea_score
+    from .calculators.sogang import calculate_sogang_score
+    from .calculators.snu import calculate_snu_score
+    from .calculators.yonsei import calculate_yonsei_score
+except ImportError:
+    # 계산기가 삭제된 경우 더미 함수
+    def calculate_khu_score(*args, **kwargs): return {}
+    def calculate_korea_score(*args, **kwargs): return {}
+    def calculate_sogang_score(*args, **kwargs): return {}
+    def calculate_snu_score(*args, **kwargs): return {}
+    def calculate_yonsei_score(*args, **kwargs): return {}
 
 
 def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[str, Any]:
@@ -287,7 +303,8 @@ def _format_univ_converted_section(calc_result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-# 대학명(또는 키워드) → 환산 점수 계산 함수 등록
+# [DEPRECATED] 대학명(또는 키워드) → 환산 점수 계산 함수 등록
+# 새로운 코드는 suneung_calculator.run_suneung_search()를 사용하세요 (86개 대학 지원)
 UNIV_CONVERTED_CALCULATORS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     "경희대": _calc_khu_converted_score,
     "경희대학교": _calc_khu_converted_score,

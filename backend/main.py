@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
 from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs
+from routes import calculator
 import os
 # agent_admin은 router_agent 테스트 중 비활성화
 
@@ -45,6 +46,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["문서관�
 app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자평가"])
 app.include_router(admin_logs.router, prefix="/api/admin", tags=["관리자로그"])
+app.include_router(calculator.calculator_bp, prefix="/api/calculator", tags=["수능계산기"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
