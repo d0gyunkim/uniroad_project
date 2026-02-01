@@ -6,6 +6,7 @@ import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
 import AuthModal from '../components/AuthModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
+import ProfileForm from '../components/ProfileForm'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { FrontendTimingLogger } from '../utils/timingLogger'
@@ -125,6 +126,7 @@ export default function ChatPage() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isOpenChatModalOpen, setIsOpenChatModalOpen] = useState(false)
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
+  const [isProfileFormOpen, setIsProfileFormOpen] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -1010,12 +1012,25 @@ export default function ChatPage() {
                 </button>
 
                 {/* 3월 6월 9월 모의고사 성적 입력 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group">
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                <button 
+                  onClick={() => {
+                    if (!isAuthenticated) {
+                      alert('로그인이 필요합니다.')
+                      setIsAuthModalOpen(true)
+                      return
+                    }
+                    setIsProfileFormOpen(true)
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group"
+                >
+                  <div className="w-5 h-5 rounded-full border-2 border-blue-500 flex items-center justify-center flex-shrink-0 group-hover:border-blue-600 transition-colors">
+                    <svg className="w-3 h-3 text-blue-500 group-hover:text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-900">3월 6월 9월 모의고사 성적 입력</p>
-                    <p className="text-[10px] text-gray-500">모의고사 성적을 입력해주세요</p>
+                    <p className="text-xs font-medium text-gray-900">모의고사 성적 입력</p>
+                    <p className="text-[10px] text-gray-500">AI 상담에 활용됩니다</p>
                   </div>
                 </button>
 
@@ -1772,6 +1787,12 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+
+      {/* 프로필 폼 모달 */}
+      <ProfileForm 
+        isOpen={isProfileFormOpen} 
+        onClose={() => setIsProfileFormOpen(false)} 
+      />
       </div>
     </div>
   )

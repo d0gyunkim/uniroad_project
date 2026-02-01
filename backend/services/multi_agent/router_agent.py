@@ -398,10 +398,117 @@ def get_router() -> RouterAgent:
     return _router
 
 
-async def route_query(message: str, history: List[Dict] = None) -> Dict[str, Any]:
-    """편의 함수"""
+async def route_query(message: str, history: List[Dict] = None, user_id: str = None) -> Dict[str, Any]:
+    """
+    편의 함수 (프로필 점수 자동 보완 포함)
+    
+    Args:
+        message: 사용자 질문
+        history: 대화 히스토리
+        user_id: 사용자 ID (프로필 점수 조회용, optional)
+    """
     router = get_router()
-    return await router.route(message, history)
+    result = await router.route(message, history)
+    
+    # consult 호출인데 scores가 없으면 프로필에서 가져오기
+    if user_id:
+        await _fill_scores_from_profile(result, user_id)
+    
+    return result
+
+
+async def _fill_scores_from_profile(result: Dict[str, Any], user_id: str) -> None:
+    """
+    consult 함수 호출에 scores가 없으면 프로필에서 가져와서 채우기
+    
+    조건:
+    - consult 함수가 호출되었고
+    - scores 파라미터가 비어있거나 없을 때만
+    
+    프로필 점수 변환:
+    - 표준점수 우선, 없으면 백분위, 없으면 등급
+    - {"국어": {"등급": 1, "표준점수": 140, "백분위": 95, "선택과목": "화작"}}
+      -> {"국어": {"type": "표준점수", "value": 140, "선택과목": "화작"}}
+    """
+    function_calls = result.get("function_calls", [])
+    
+    for call in function_calls:
+        if call.get("function") == "consult":
+            params = call.get("params", {})
+            scores = params.get("scores", {})
+            
+            # scores가 비어있으면 프로필에서 가져오기
+            if not scores or len(scores) == 0:
+                try:
+                    from services.supabase_client import supabase_service
+                    profile = await supabase_service.get_user_profile(user_id)
+                    
+                    if profile and profile.get("scores"):
+                        profile_scores = profile["scores"]
+                        print(f"📊 프로필 원본 점수: {profile_scores}")
+                        # 프로필 점수를 consult 함수 형식으로 변환
+                        converted_scores = _convert_profile_scores_to_consult_format(profile_scores)
+                        print(f"🔄 변환된 점수: {converted_scores}")
+                        params["scores"] = converted_scores
+                        print(f"✅ 프로필에서 점수 자동 보완 완료: {list(converted_scores.keys())}")
+                    else:
+                        print("⚠️ 프로필에 저장된 점수 없음")
+                except Exception as e:
+                    print(f"⚠️ 프로필 점수 조회 실패: {e}")
+
+
+def _convert_profile_scores_to_consult_format(profile_scores: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    프로필 점수를 consult 함수 형식으로 변환
+    
+    Input (프로필):
+        {"국어": {"등급": 1, "표준점수": 140, "백분위": 95, "선택과목": "화작"}}
+    
+    Output (consult):
+        {"국어": {"type": "표준점수", "value": 140, "등급": 1, "백분위": 95, "선택과목": "화작"}}
+    
+    우선순위: 표준점수 > 백분위 > 등급 (type과 value 결정용)
+    하지만 입력된 모든 점수 정보를 함께 전달
+    """
+    converted = {}
+    
+    for subject, score_data in profile_scores.items():
+        if not isinstance(score_data, dict):
+            continue
+        
+        # 우선순위에 따라 type과 value 결정 (메인 점수)
+        score_type = None
+        score_value = None
+        
+        if score_data.get("표준점수") is not None:
+            score_type = "표준점수"
+            score_value = score_data["표준점수"]
+        elif score_data.get("백분위") is not None:
+            score_type = "백분위"
+            score_value = score_data["백분위"]
+        elif score_data.get("등급") is not None:
+            score_type = "등급"
+            score_value = score_data["등급"]
+        
+        if score_type and score_value is not None:
+            converted[subject] = {
+                "type": score_type,
+                "value": score_value
+            }
+            
+            # 다른 점수 정보도 모두 추가 (있으면)
+            if score_data.get("등급") is not None:
+                converted[subject]["등급"] = score_data["등급"]
+            if score_data.get("표준점수") is not None:
+                converted[subject]["표준점수"] = score_data["표준점수"]
+            if score_data.get("백분위") is not None:
+                converted[subject]["백분위"] = score_data["백분위"]
+            
+            # 선택과목 추가 (있으면)
+            if score_data.get("선택과목"):
+                converted[subject]["선택과목"] = score_data["선택과목"]
+    
+    return converted
 
 
 # ============================================================

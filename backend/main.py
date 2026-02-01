@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, profile
 from routes import calculator
 import os
 # agent_admin은 router_agent 테스트 중 비활성화
@@ -39,6 +39,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(auth.router, prefix="/api/auth", tags=["인증"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["세션관리"])
+app.include_router(profile.router, prefix="/api/profile", tags=["프로필"])
 app.include_router(chat.router, prefix="/api/chat", tags=["채팅"])
 app.include_router(upload.router, prefix="/api/upload", tags=["업로드"])
 app.include_router(documents.router, prefix="/api/documents", tags=["문서관리"])
