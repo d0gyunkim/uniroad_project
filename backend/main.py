@@ -56,10 +56,13 @@ FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
 FRONTEND_PUBLIC_DIR = os.path.join(BASE_DIR, "frontend", "public")
 
 # 정적 파일 서빙 (landing 폴더의 이미지 등)
-app.mount("/landing", StaticFiles(directory=LANDING_DIR), name="landing")
+if os.path.exists(LANDING_DIR):
+    app.mount("/landing", StaticFiles(directory=LANDING_DIR), name="landing")
 
-# 채팅 앱 정적 파일 서빙 (빌드된 프론트엔드)
-app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST_DIR, "assets")), name="assets")
+# 채팅 앱 정적 파일 서빙 (빌드된 프론트엔드) - 개발 모드에서는 건너뜀
+FRONTEND_ASSETS_DIR = os.path.join(FRONTEND_DIST_DIR, "assets")
+if os.path.exists(FRONTEND_ASSETS_DIR):
+    app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="assets")
 
 @app.on_event("startup")
 async def startup_event():
@@ -136,7 +139,10 @@ async def background_image():
 async def chat_app(full_path: str = ""):
     """채팅 애플리케이션 (SPA)"""
     frontend_index = os.path.join(FRONTEND_DIST_DIR, "index.html")
-    return FileResponse(frontend_index)
+    if os.path.exists(frontend_index):
+        return FileResponse(frontend_index)
+    # 개발 모드: 프론트엔드 dev 서버로 리다이렉트 안내
+    return {"message": "개발 모드: http://localhost:5173 에서 프론트엔드를 확인하세요"}
 
 
 @app.get("/api/health")
